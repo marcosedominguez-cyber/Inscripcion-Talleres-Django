@@ -1,0 +1,21 @@
+export const LOGIN_URL = '/cuentas/login/?next=%2Ftalleres%2F';
+
+export async function obtenerCatalogo({ signal } = {}) {
+  const response = await fetch('/api/participantes/talleres/', {
+    signal,
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!response.ok) {
+    const error = new Error('No pudimos cargar los talleres. Intentá nuevamente.');
+    error.status = response.status;
+    throw error;
+  }
+
+  const data = await response.json();
+  if (!Array.isArray(data.talleres) || typeof data.zona_horaria !== 'string') {
+    throw new Error('La respuesta del catálogo no tiene el formato esperado.');
+  }
+  return data;
+}
