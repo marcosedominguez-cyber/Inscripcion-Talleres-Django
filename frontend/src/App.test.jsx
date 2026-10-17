@@ -6,7 +6,7 @@ import { api } from './api.js';
 
 vi.mock('./api.js', () => ({ api: vi.fn() }));
 beforeEach(() => { api.mockReset(); api.mockResolvedValue({ usuario: null }); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 test('registro de instructor envía su rol y vuelve al login sin autenticar', async () => {
   render(<App />);
@@ -24,18 +24,33 @@ test('registro de instructor envía su rol y vuelve al login sin autenticar', as
   expect(screen.getByLabelText('Contraseña').value).toBe('');
 });
 
-test('login muestra la sesión real y logout vuelve al inicio', async () => {
+test('el instructor conserva su pantalla provisional y puede cerrar sesión', async () => {
   render(<App />);
   fireEvent.click(await screen.findByRole('button', { name: 'Ingresar o registrarse' }));
   fireEvent.change(screen.getByLabelText('CI'), { target: { value: '1234' } });
   fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'clave' } });
   api.mockImplementation(async (ruta) => ruta === 'login'
-    ? { usuario: { nombre_usuario: 'Ana', rol_nombre: 'Participante' } } : { usuario: null });
+    ? { usuario: { nombre_usuario: 'Ana', rol: 'instructor', rol_nombre: 'Instructor' } } : { usuario: null });
   fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
   await screen.findByText('Hola, Ana.');
+  expect(screen.queryByRole('heading', { name: 'Próximos talleres' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
   await screen.findByRole('button', { name: 'Ingresar o registrarse' });
   expect(api).toHaveBeenCalledWith('logout', {});
+});
+
+test('el participante llega al catálogo vacío después de iniciar sesión', async () => {
+  const catalogo = { talleres: [], zona_horaria: 'UTC', usuario: { nombre: 'Ismael' } };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => catalogo }));
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Ingresar o registrarse' }));
+  fireEvent.change(screen.getByLabelText('CI'), { target: { value: '1234' } });
+  fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'clave' } });
+  api.mockImplementation(async (ruta) => ruta === 'login'
+    ? { usuario: { nombre_usuario: 'Ismael', rol: 'participante', rol_nombre: 'Participante' } } : { usuario: null });
+  fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
+  await screen.findByRole('heading', { name: 'No hay talleres disponibles' });
+  expect(screen.getByText('Ismael')).toBeTruthy();
 });
 
 test('un rechazo del servidor se muestra sin abrir la cuenta', async () => {
