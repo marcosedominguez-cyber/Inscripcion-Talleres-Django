@@ -1,0 +1,22 @@
+:root { font-family: Arial, sans-serif; color: #222; background: #fafafa; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(100% - 32px, 430px); margin: 64px auto; }
+h1 { font-size: 1.8rem; margin-bottom: 32px; }
+h2 { font-size: 1.25rem; }
+section, form, nav { display: grid; gap: 16px; }
+nav { gap: 8px; }
+label { display: grid; gap: 6px; font-weight: 600; }
+input, button { font: inherit; padding: 11px 12px; border-radius: 4px; }
+input { width: 100%; border: 1px solid #999; background: white; }
+button { border: 1px solid #222; background: #222; color: white; cursor: pointer; }
+button.secundario { background: white; color: #222; }
+button.enlace { border: 0; background: transparent; color: #234b85; text-decoration: underline; padding: 6px; }
+button:disabled { opacity: .6; cursor: wait; }
+:focus-visible { outline: 3px solid #4a80b8; outline-offset: 3px; }
+small { color: #555; line-height: 1.4; }
+p { line-height: 1.5; margin: 0; }
+.error, .mensaje { padding: 12px; margin-bottom: 16px; border: 1px solid; border-radius: 4px; }
+.error { color: #8a1616; background: #fff1f1; }
+.mensaje { color: #195b31; background: #edf8f0; }
+@media (max-width: 480px) { main { margin-top: 32px; } }

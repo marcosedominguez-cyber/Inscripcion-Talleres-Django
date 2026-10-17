@@ -17,7 +17,7 @@ from django.utils import timezone
 from pymongo.errors import PyMongoError
 from proyecto.reglas_inscripciones import InscripcionError
 from proyecto.reglas_usuarios import DatosParticipanteInvalidosError
-from talleres.models import Participante, Taller, Inscripcion
+from talleres.models import Usuario, Taller, Inscripcion
 from talleres import services
 
 
@@ -66,7 +66,7 @@ def ejecutar():
                         print(f"[{taller.codigo}] {taller.nombre} | Cupos totales: {taller.cupos} | Disponibles: {services.cupos_disponibles(taller)}")
                         print(f"  Inicio: {timezone.localtime(taller.fecha_inicio):%Y-%m-%d %H:%M} | Fin: {timezone.localtime(taller.fecha_fin):%Y-%m-%d %H:%M}")
                 elif opcion == "4":
-                    participante = input("ID del participante (ej. P-001): ").strip()
+                    participante = input("CI del participante o código anterior (ej. P-001): ").strip()
                     taller = input("ID del taller (ej. T-001): ").strip()
                     services.inscribir_participante(participante, taller)
                     print(f"¡Inscripción confirmada! Participante {participante} en taller {taller}")
@@ -74,18 +74,18 @@ def ejecutar():
                     inscripciones = list(Inscripcion.objects.all())
                     if not inscripciones:
                         print("Aún no hay inscripciones registradas.")
-                    participantes = {p.pk: p for p in Participante.objects.all()}
+                    participantes = {p.pk: p for p in Usuario.objects.filter(rol=Usuario.Rol.PARTICIPANTE)}
                     talleres = {t.pk: t for t in Taller.objects.all()}
                     for numero, inscripcion in enumerate(inscripciones, start=1):
                         participante = participantes.get(inscripcion.participante_id)
                         taller = talleres.get(inscripcion.taller_id)
                         print(f"{numero}. {participante or inscripcion.participante_id} -> {taller or inscripcion.taller_id} [{inscripcion.estado}]")
                 elif opcion == "6":
-                    participantes = list(Participante.objects.all())
+                    participantes = list(Usuario.objects.filter(rol=Usuario.Rol.PARTICIPANTE))
                     if not participantes:
                         print("No hay participantes registrados.")
                     for participante in participantes:
-                        print(f"[{participante.codigo}] {participante.nombre}")
+                        print(f"[{participante.ci or participante.codigo}] {participante.nombre}")
                 elif opcion == "7":
                     print("¡Hasta luego! Los datos permanecen guardados.")
                     break
