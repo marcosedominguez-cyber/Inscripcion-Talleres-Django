@@ -29,7 +29,17 @@ SECRET_KEY = 'django-insecure-a3m+reyg)51ikflafrc@idt0^u4%1yc8czb@7!1)%_(qkef&kf
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+CSRF_TRUSTED_ORIGINS = os.getenv(
+    "DJANGO_CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+CSRF_FAILURE_VIEW = "cuentas.views.csrf_error"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+AUTHENTICATION_BACKENDS = [
+    "cuentas.backends.CIBackend",
+    "django.contrib.auth.backends.ModelBackend",  # Mantiene el acceso administrativo existente.
+]
 
 
 # Application definition
@@ -43,6 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_mongodb_backend',
     'talleres.apps.TalleresConfig',
+    'cuentas.apps.CuentasConfig',
 ]
 
 MIDDLEWARE = [
@@ -60,7 +71,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'frontend' / 'dist'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -83,6 +94,7 @@ DATABASES = {
         'ENGINE': 'django_mongodb_backend',
         'HOST': os.environ['MONGODB_URI'],
         'NAME': os.environ['MONGODB_DATABASE'],
+        'OPTIONS': {'serverSelectionTimeoutMS': 5000, 'connectTimeoutMS': 5000},
     },
 }
 
@@ -112,7 +124,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'es'
 
 TIME_ZONE = 'UTC'
 
@@ -125,6 +137,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / 'frontend' / 'dist'] if (BASE_DIR / 'frontend' / 'dist').exists() else []
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field

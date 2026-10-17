@@ -1,34 +1,54 @@
 """Datos persistentes del sistema de terminal, almacenados en MongoDB Atlas."""
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django_mongodb_backend.fields import ObjectIdAutoField
 
 
-class Participante(models.Model):
+class Usuario(models.Model):
+    class Rol(models.TextChoices):
+        PARTICIPANTE = "participante", "Participante"
+        INSTRUCTOR = "instructor", "Instructor"
+        ADMINISTRADOR = "administrador", "Administrador del sistema"
+
     id = ObjectIdAutoField(primary_key=True)
-    codigo = models.CharField(max_length=32, unique=True)
+    # Solo para compatibilidad con registros de terminal anteriores a las cuentas.
+    codigo = models.CharField(max_length=32, unique=True, null=True, blank=True)
     nombre = models.CharField(max_length=200)
+    ci = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    cuenta = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="perfil", null=True, blank=True,
+    )
+    rol = models.CharField(max_length=20, choices=Rol.choices, default=Rol.PARTICIPANTE)
 
     class Meta:
         db_table = "participantes"
-        ordering = ["codigo"]
+        ordering = ["nombre", "id"]
 
     def clean(self):
         super().clean()
-        self.codigo = self.codigo.strip()
+        self.codigo = (self.codigo.strip() or None) if self.codigo else None
+        self.ci = (self.ci.strip() or None) if self.ci else None
         self.nombre = self.nombre.strip()
         errores = {}
-        if not self.codigo:
-            errores["codigo"] = "El código del participante es obligatorio."
+        if self.cuenta_id and (not self.ci or not self.ci.isascii() or not self.ci.isdecimal()):
+            errores["ci"] = "La CI de una cuenta debe contener solo números."
+        if not self.cuenta_id and not self.codigo:
+            errores["codigo"] = "Un registro anterior sin cuenta debe conservar su código."
         if not self.nombre:
-            errores["nombre"] = "El nombre del participante es obligatorio."
+            errores["nombre"] = "El nombre del usuario es obligatorio."
         if errores:
             raise ValidationError(errores)
 
     def __str__(self):
-        return f"{self.codigo} - {self.nombre}"
+        return f"{self.ci or self.codigo or self.pk} - {self.nombre}"
+
+
+# Compatibilidad de importación: es el mismo modelo, no otra colección.
+Participante = Usuario
 
 
 class Taller(models.Model):
@@ -40,6 +60,10 @@ class Taller(models.Model):
     fecha_inicio = models.DateTimeField()
     fecha_fin = models.DateTimeField()
     revision = models.PositiveIntegerField(default=0, editable=False)
+    instructor = models.ForeignKey(
+        Usuario, on_delete=models.PROTECT, related_name="talleres_propios",
+        null=True, blank=True, limit_choices_to={"rol": Usuario.Rol.INSTRUCTOR},
+    )
 
     class Meta:
         db_table = "talleres"
@@ -69,7 +93,8 @@ class Inscripcion(models.Model):
 
     id = ObjectIdAutoField(primary_key=True)
     participante = models.ForeignKey(
-        Participante, on_delete=models.PROTECT, related_name="inscripciones"
+        Usuario, on_delete=models.PROTECT, related_name="inscripciones",
+        limit_choices_to={"rol": Usuario.Rol.PARTICIPANTE},
     )
     taller = models.ForeignKey(
         Taller, on_delete=models.PROTECT, related_name="inscripciones"

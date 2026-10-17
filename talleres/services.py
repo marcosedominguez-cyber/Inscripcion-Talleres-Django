@@ -4,7 +4,7 @@ import time
 from functools import wraps
 
 from django.db import DatabaseError, IntegrityError
-from django.db.models import F
+from django.db.models import F, Q
 from django_mongodb_backend.transaction import atomic
 
 from proyecto.reglas_inscripciones import (
@@ -12,7 +12,7 @@ from proyecto.reglas_inscripciones import (
     ParticipanteNoEncontradoError, TallerNoEncontradoError,
 )
 from proyecto.reglas_usuarios import DatosParticipanteInvalidosError
-from talleres.models import Contador, Inscripcion, Participante, Taller
+from talleres.models import Contador, Inscripcion, Usuario, Taller
 
 
 def _transaccion(funcion):
@@ -52,7 +52,7 @@ def _siguiente_codigo(nombre, prefijo):
 
 @_transaccion
 def _crear_participante(nombre):
-    participante = Participante(codigo=_siguiente_codigo("participantes", "P"), nombre=nombre)
+    participante = Usuario(codigo=_siguiente_codigo("participantes", "P"), nombre=nombre)
     participante.full_clean()
     participante.save()
     return participante
@@ -95,8 +95,11 @@ def cupos_disponibles(taller):
 @_transaccion
 def inscribir_participante(codigo_participante, codigo_taller):
     try:
-        participante = Participante.objects.get(codigo=codigo_participante)
-    except Participante.DoesNotExist:
+        participante = Usuario.objects.get(
+            Q(codigo=codigo_participante) | Q(ci=codigo_participante),
+            rol=Usuario.Rol.PARTICIPANTE,
+        )
+    except Usuario.DoesNotExist:
         raise ParticipanteNoEncontradoError(
             f"No existe un participante con el ID {codigo_participante!r}."
         ) from None
