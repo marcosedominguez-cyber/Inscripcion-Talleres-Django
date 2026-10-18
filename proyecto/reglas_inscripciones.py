@@ -46,6 +46,14 @@ class CupoAgotadoError(InscripcionError):
     """El taller no puede aceptar otra inscripción confirmada."""
 
 
+class TallerNoAprobadoError(InscripcionError):
+    """El taller todavía no fue aprobado para publicación e inscripción."""
+
+
+class PlazoInscripcionVencidoError(InscripcionError):
+    """La ventana de inscripción cerró un minuto antes del inicio."""
+
+
 def inscribir_participante(
     participante_id: str,
     taller_id: str,

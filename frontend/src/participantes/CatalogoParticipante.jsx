@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { obtenerCatalogo } from './api.js';
+import { inscribirEnTaller, obtenerCatalogo } from './api.js';
 import './catalogo.css';
 
 function FechaTaller({ valor, zona }) {
@@ -13,7 +13,7 @@ function FechaTaller({ valor, zona }) {
   return <time dateTime={valor}>{dia} <span>· {hora}</span></time>;
 }
 
-function TarjetaTaller({ taller, zona }) {
+function TarjetaTaller({ taller, zona, onInscribirme, enviando }) {
   return (
     <article className="pw-card" aria-labelledby={`taller-${taller.codigo}`}>
       <div className="pw-card-top">
@@ -32,6 +32,9 @@ function TarjetaTaller({ taller, zona }) {
         <span>Disponibles</span>
         <strong>{taller.cupos_disponibles}</strong>
       </div>
+      <button className="pw-action" type="button" onClick={() => onInscribirme(taller.codigo)} disabled={enviando}>
+        {enviando ? 'Inscribiendo…' : 'Inscribirme'}
+      </button>
     </article>
   );
 }
@@ -41,6 +44,8 @@ export default function CatalogoParticipante({
 }) {
   const [estado, setEstado] = useState({ tipo: 'cargando' });
   const [intento, setIntento] = useState(0);
+  const [codigoEnviando, setCodigoEnviando] = useState(null);
+  const [mensajeInscripcion, setMensajeInscripcion] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,6 +72,40 @@ export default function CatalogoParticipante({
 
   const datos = estado.tipo === 'listo' ? estado.datos : null;
   const nombre = datos?.usuario?.nombre || usuario.nombre_usuario;
+
+  async function inscribirme(codigo) {
+    setCodigoEnviando(codigo);
+    setMensajeInscripcion(null);
+    try {
+      const resultado = await inscribirEnTaller(codigo);
+      setMensajeInscripcion({ tipo: 'exito', texto: resultado.mensaje || 'Te inscribiste correctamente.' });
+      try {
+        const actualizado = await cargarCatalogo({});
+        setEstado({ tipo: 'listo', datos: actualizado });
+      } catch {
+        setMensajeInscripcion({
+          tipo: 'exito',
+          texto: 'Te inscribiste correctamente. No se pudo actualizar el catálogo; vuelve a intentarlo en unos segundos.',
+        });
+      }
+    } catch (fallo) {
+      if (fallo.status === 401) {
+        onSesionCaducada();
+      } else if (fallo.status === 409 || fallo.status === 403 || fallo.status === 404 || fallo.status === 400) {
+        setMensajeInscripcion({ tipo: 'error', texto: fallo.message });
+        if (fallo.status === 409) {
+          try {
+            const actualizado = await cargarCatalogo({});
+            setEstado({ tipo: 'listo', datos: actualizado });
+          } catch { /* El error de inscripción sigue siendo el mensaje principal. */ }
+        }
+      } else {
+        setMensajeInscripcion({ tipo: 'error', texto: fallo.message || 'No se pudo completar la inscripción.' });
+      }
+    } finally {
+      setCodigoEnviando(null);
+    }
+  }
 
   return (
     <div className="pw-app">
@@ -110,6 +149,11 @@ export default function CatalogoParticipante({
             {datos && <p className="pw-timezone">Horarios en {datos.zona_horaria}</p>}
           </div>
           <p className="pw-help">Consultá las fechas y el cupo máximo de cada taller.</p>
+          {mensajeInscripcion && (
+            <p className="pw-empty" role={mensajeInscripcion.tipo === 'exito' ? 'status' : 'alert'}>
+              {mensajeInscripcion.texto}
+            </p>
+          )}
           {estado.tipo === 'cargando' && <div className="pw-empty" role="status">Cargando talleres…</div>}
           {estado.tipo === 'sin-permiso' && (
             <div className="pw-empty" role="alert">
@@ -127,7 +171,8 @@ export default function CatalogoParticipante({
           {datos && (
             <div className="pw-grid">
               {datos.talleres.length > 0 ? datos.talleres.map((taller) => (
-                <TarjetaTaller key={taller.codigo} taller={taller} zona={datos.zona_horaria} />
+                <TarjetaTaller key={taller.codigo} taller={taller} zona={datos.zona_horaria}
+                  onInscribirme={inscribirme} enviando={codigoEnviando === taller.codigo} />
               )) : (
                 <div className="pw-empty" role="status">
                   <div className="pw-empty-icon" aria-hidden="true">✳</div>

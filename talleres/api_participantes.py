@@ -3,14 +3,19 @@
 from django.core.exceptions import FieldError, ImproperlyConfigured, ObjectDoesNotExist
 from django.db import DatabaseError
 from django.http import JsonResponse
+import json
 from django.utils import timezone
-from django.views.decorators.http import require_safe
+from django.views.decorators.http import require_POST, require_safe
 from django.views.decorators.cache import never_cache
 from pymongo.errors import PyMongoError
 
 from talleres.consultas_participantes import listar_talleres_proximos
 from talleres.models import Usuario
-from talleres.services import cupos_disponibles
+from proyecto.reglas_inscripciones import (
+    CupoAgotadoError, InscripcionDuplicadaError, ParticipanteNoEncontradoError,
+    PlazoInscripcionVencidoError, TallerNoAprobadoError, TallerNoEncontradoError,
+)
+from talleres.services import cupos_disponibles, inscribir_participante
 
 
 @require_safe
@@ -50,3 +55,51 @@ def catalogo_talleres_api(request):
             "nombre": request.user.get_full_name() or request.user.get_username(),
         },
     })
+
+
+@require_POST
+@never_cache
+def inscripcion_participante_api(request):
+    """Inscribe al participante autenticado; la identidad nunca viene del cliente."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"detail": "Se requiere iniciar sesión."}, status=401)
+    try:
+        perfil = request.user.perfil
+    except ObjectDoesNotExist:
+        return JsonResponse({"detail": "Se requiere un perfil de participante."}, status=403)
+    if perfil.rol != Usuario.Rol.PARTICIPANTE:
+        return JsonResponse({"detail": "Esta operación es exclusiva para participantes."}, status=403)
+    if not perfil.ci:
+        return JsonResponse({"detail": "El perfil no tiene una identificación válida."}, status=403)
+    try:
+        datos = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"detail": "El cuerpo debe ser JSON válido."}, status=400)
+    if not isinstance(datos, dict) or set(datos) != {"codigo_taller"}:
+        return JsonResponse(
+            {"detail": "Envía únicamente el código del taller."}, status=400
+        )
+    codigo = datos.get("codigo_taller")
+    if not isinstance(codigo, str) or not codigo.strip() or len(codigo.strip()) > 32:
+        return JsonResponse({"detail": "El código del taller no es válido."}, status=400)
+    try:
+        inscripcion = inscribir_participante(perfil.ci, codigo.strip())
+    except ParticipanteNoEncontradoError:
+        return JsonResponse({"detail": "El perfil no corresponde a un participante válido."}, status=403)
+    except TallerNoEncontradoError:
+        return JsonResponse({"detail": "No se encontró el taller solicitado."}, status=404)
+    except InscripcionDuplicadaError as error:
+        return JsonResponse({"detail": str(error)}, status=409)
+    except CupoAgotadoError as error:
+        return JsonResponse({"detail": str(error)}, status=409)
+    except TallerNoAprobadoError as error:
+        return JsonResponse({"detail": str(error)}, status=409)
+    except PlazoInscripcionVencidoError as error:
+        return JsonResponse({"detail": str(error)}, status=409)
+    except (DatabaseError, PyMongoError, FieldError, ImproperlyConfigured):
+        return JsonResponse({"detail": "No se pudo completar la inscripción."}, status=503)
+
+    return JsonResponse({
+        "mensaje": "Te inscribiste correctamente.",
+        "inscripcion": {"id": str(inscripcion.pk), "estado": inscripcion.estado},
+    }, status=201)
