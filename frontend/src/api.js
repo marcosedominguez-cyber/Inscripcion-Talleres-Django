@@ -1,8 +1,8 @@
 let csrfToken;
 
-export async function api(path, datos) {
-  const response = await fetch(`/api/cuentas/${path}/`, {
-    method: datos === undefined ? 'GET' : 'POST',
+export async function solicitudApi(url, { method = 'GET', datos } = {}) {
+  const response = await fetch(url, {
+    method,
     credentials: 'same-origin',
     headers: datos === undefined ? {} : {
       'Content-Type': 'application/json',
@@ -19,7 +19,15 @@ export async function api(path, datos) {
   if (result.csrfToken) csrfToken = result.csrfToken;
   if (!response.ok) {
     const messages = Object.values(result.errores || {}).flat();
-    throw new Error(result.mensaje || messages.join(' ') || 'No se pudo completar la solicitud.');
+    const error = new Error(result.mensaje || result.detail || messages.join(' ') || 'No se pudo completar la solicitud.');
+    error.status = response.status;
+    throw error;
   }
   return result;
+}
+
+export function api(path, datos) {
+  return solicitudApi(`/api/cuentas/${path}/`, {
+    method: datos === undefined ? 'GET' : 'POST', datos,
+  });
 }

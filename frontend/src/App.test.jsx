@@ -2,10 +2,15 @@ import React from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App.jsx';
-import { api } from './api.js';
+import { api, solicitudApi } from './api.js';
 
-vi.mock('./api.js', () => ({ api: vi.fn() }));
-beforeEach(() => { api.mockReset(); api.mockResolvedValue({ usuario: null }); });
+vi.mock('./api.js', () => ({ api: vi.fn(), solicitudApi: vi.fn() }));
+beforeEach(() => {
+  api.mockReset();
+  solicitudApi.mockReset();
+  api.mockResolvedValue({ usuario: null });
+  solicitudApi.mockResolvedValue({ talleres: [] });
+});
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 test('registro de instructor envía su rol y vuelve al login sin autenticar', async () => {
@@ -32,7 +37,7 @@ test('el instructor conserva su pantalla provisional y puede cerrar sesión', as
   api.mockImplementation(async (ruta) => ruta === 'login'
     ? { usuario: { nombre_usuario: 'Ana', rol: 'instructor', rol_nombre: 'Instructor' } } : { usuario: null });
   fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
-  await screen.findByText('Hola, Ana.');
+  await screen.findByText((_, element) => element.tagName === 'P' && element.textContent.includes('Hola, Ana.'));
   expect(screen.queryByRole('heading', { name: 'Próximos talleres' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
   await screen.findByRole('button', { name: 'Ingresar o registrarse' });

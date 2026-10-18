@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.test import RequestFactory, SimpleTestCase
 from talleres.api_participantes import catalogo_talleres_api
@@ -13,7 +14,8 @@ class CatalogoApiTests(SimpleTestCase):
         return request
 
     def test_participante_recibe_catalogo_vacio(self):
-        response = catalogo_talleres_api(self.solicitud(Usuario.Rol.PARTICIPANTE))
+        with patch("talleres.api_participantes.listar_talleres_proximos", return_value=[]):
+            response = catalogo_talleres_api(self.solicitud(Usuario.Rol.PARTICIPANTE))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content)["talleres"], [])
 
