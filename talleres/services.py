@@ -3,6 +3,7 @@
 import time
 from functools import wraps
 
+from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError
 from django.db.models import F, Q
 from django_mongodb_backend.transaction import atomic
@@ -73,15 +74,28 @@ def _crear_taller(datos):
     return taller
 
 
-def registrar_taller(nombre, cupos, fecha_inicio, fecha_fin, descripcion=""):
+def registrar_taller(nombre, cupos, fecha_inicio, fecha_fin, descripcion="", *,
+                     instructor=None):
+    # Ninguna alta del servicio se publica antes de una decisión administrativa.
+    # El parámetro opcional conserva la firma anterior de CLI/servicios.
     datos = dict(nombre=nombre, cupos=cupos, fecha_inicio=fecha_inicio,
-                 fecha_fin=fecha_fin, descripcion=descripcion)
+                 fecha_fin=fecha_fin, descripcion=descripcion,
+                 instructor=instructor,
+                 estado_aprobacion=Taller.Aprobacion.PENDIENTE)
     # Validar antes de tocar la secuencia; no consulta unicidad del código provisional.
     Taller(codigo="pendiente", **datos).full_clean(
         validate_unique=False, validate_constraints=False
     )
     _preparar_contador("talleres")
     return _crear_taller(datos)
+
+
+def proponer_taller(instructor, nombre, cupos, fecha_inicio, fecha_fin, descripcion=""):
+    if instructor.rol != Usuario.Rol.INSTRUCTOR:
+        raise ValidationError({"instructor": "Solo un instructor puede proponer talleres."})
+    return registrar_taller(
+        nombre, cupos, fecha_inicio, fecha_fin, descripcion, instructor=instructor
+    )
 
 
 def cupos_disponibles(taller):

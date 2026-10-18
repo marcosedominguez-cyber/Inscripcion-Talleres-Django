@@ -7,8 +7,9 @@ body { margin: 0; }
 .acceso section, .acceso form, .acceso nav { display: grid; gap: 16px; }
 .acceso nav { gap: 8px; }
 .acceso label { display: grid; gap: 6px; font-weight: 600; }
-.acceso input, .acceso button { font: inherit; padding: 11px 12px; border-radius: 4px; }
+.acceso input, .acceso textarea, .acceso button { font: inherit; padding: 11px 12px; border-radius: 4px; }
 .acceso input { width: 100%; border: 1px solid #999; background: white; }
+.acceso textarea { width: 100%; min-height: 90px; border: 1px solid #999; background: white; }
 .acceso button { border: 1px solid #222; background: #222; color: white; cursor: pointer; }
 .acceso button.secundario { background: white; color: #222; }
 .acceso button.enlace { border: 0; background: transparent; color: #234b85; text-decoration: underline; padding: 6px; }
@@ -19,4 +20,9 @@ body { margin: 0; }
 .acceso .error, .acceso .mensaje { padding: 12px; margin-bottom: 16px; border: 1px solid; border-radius: 4px; }
 .acceso .error { color: #8a1616; background: #fff1f1; }
 .acceso .mensaje { color: #195b31; background: #edf8f0; }
+.gestion-instructor { width: min(100% - 32px, 760px); }
+.gestion-instructor form, .lista-talleres { display: grid; gap: 14px; }
+.lista-talleres article { padding: 16px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+.lista-talleres h3 { display: flex; justify-content: space-between; gap: 12px; }
+.lista-talleres small { color: #555; }
 @media (max-width: 480px) { .acceso { margin-top: 32px; } }

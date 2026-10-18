@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.js';
 import CatalogoParticipante from './participantes/CatalogoParticipante.jsx';
+import InstructorPanel from './InstructorPanel.jsx';
 
 export default function App() {
   const [pantalla, setPantalla] = useState('inicio');
@@ -84,6 +85,11 @@ export default function App() {
       onSesionCaducada={sesionCaducada} enviando={enviando} error={error} />;
   }
 
+  if (!iniciando && usuario?.rol === 'instructor') {
+    return <InstructorPanel usuario={usuario} onCerrarSesion={cerrarSesion}
+      onSesionCaducada={sesionCaducada} />;
+  }
+
   return (
     <main className="acceso">
       <h1>Inscripción talleres</h1>
@@ -135,7 +141,7 @@ export default function App() {
         <h2>Sesión iniciada</h2>
         <p>Hola, {usuario.nombre_usuario}.</p>
         <p>Rol: <strong>{usuario.rol_nombre}</strong></p>
-        <p>Tu panel de talleres está pendiente de integración con el equipo.</p>
+        {usuario.rol === 'administrador' && <p><a href="/admin/">Abrir Django Admin</a></p>}
         <button onClick={cerrarSesion} disabled={enviando}>{enviando ? 'Cerrando…' : 'Cerrar sesión'}</button>
       </section>}
     </main>

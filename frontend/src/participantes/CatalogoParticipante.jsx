@@ -29,6 +29,8 @@ function TarjetaTaller({ taller, zona }) {
       <div className="pw-capacity">
         <span>Cupo máximo</span>
         <strong>{taller.cupos} {taller.cupos === 1 ? 'persona' : 'personas'}</strong>
+        <span>Disponibles</span>
+        <strong>{taller.cupos_disponibles}</strong>
       </div>
     </article>
   );

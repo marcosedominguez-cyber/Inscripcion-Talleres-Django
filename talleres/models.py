@@ -52,6 +52,11 @@ Participante = Usuario
 
 
 class Taller(models.Model):
+    class Aprobacion(models.TextChoices):
+        PENDIENTE = "pendiente", "Pendiente"
+        APROBADO = "aprobado", "Aprobado"
+        RECHAZADO = "rechazado", "Rechazado"
+
     id = ObjectIdAutoField(primary_key=True)
     codigo = models.CharField(max_length=32, unique=True)
     nombre = models.CharField(max_length=200)
@@ -64,10 +69,24 @@ class Taller(models.Model):
         Usuario, on_delete=models.PROTECT, related_name="talleres_propios",
         null=True, blank=True, limit_choices_to={"rol": Usuario.Rol.INSTRUCTOR},
     )
+    # Los registros existentes que no tengan este campo se interpretan como
+    # pendientes: no se publican sin una decisión administrativa explícita.
+    estado_aprobacion = models.CharField(
+        max_length=20, choices=Aprobacion.choices, default=Aprobacion.PENDIENTE
+    )
 
     class Meta:
         db_table = "talleres"
         ordering = ["fecha_inicio", "codigo"]
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        taller = super().from_db(db, field_names, values)
+        # MongoDB permite documentos históricos sin el campo nuevo. Tratarlos
+        # como pendientes evita publicarlos y los mantiene revisables en admin.
+        if taller.estado_aprobacion is None:
+            taller.estado_aprobacion = cls.Aprobacion.PENDIENTE
+        return taller
 
     def clean(self):
         super().clean()
@@ -78,6 +97,8 @@ class Taller(models.Model):
             errores["codigo"] = "El código del taller es obligatorio."
         if not self.nombre:
             errores["nombre"] = "El nombre del taller es obligatorio."
+        if self.instructor_id and self.instructor.rol != Usuario.Rol.INSTRUCTOR:
+            errores["instructor"] = "El propietario del taller debe ser instructor."
         if self.fecha_inicio and self.fecha_fin and self.fecha_fin <= self.fecha_inicio:
             errores["fecha_fin"] = "El fin debe ser posterior al inicio del taller."
         if errores:

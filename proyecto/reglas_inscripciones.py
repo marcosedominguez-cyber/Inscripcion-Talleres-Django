@@ -110,5 +110,3 @@ def _ya_esta_inscrito(
         and inscripcion.taller_id == taller_id
         for inscripcion in inscripciones
     )
-
-"""pene"""

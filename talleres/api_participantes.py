@@ -6,9 +6,11 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
 from django.views.decorators.cache import never_cache
+from pymongo.errors import PyMongoError
 
 from talleres.consultas_participantes import listar_talleres_proximos
 from talleres.models import Usuario
+from talleres.services import cupos_disponibles
 
 
 @require_safe
@@ -30,12 +32,13 @@ def catalogo_talleres_api(request):
                 "nombre": taller.nombre,
                 "descripcion": taller.descripcion,
                 "cupos": taller.cupos,
+                "cupos_disponibles": cupos_disponibles(taller),
                 "fecha_inicio": taller.fecha_inicio,
                 "fecha_fin": taller.fecha_fin,
             }
             for taller in listar_talleres_proximos()
         ]
-    except (DatabaseError, FieldError, ImproperlyConfigured):
+    except (DatabaseError, PyMongoError, FieldError, ImproperlyConfigured):
         return JsonResponse(
             {"detail": "No se pudo consultar el catálogo."}, status=503
         )
