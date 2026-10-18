@@ -1,5 +1,3 @@
-export const LOGIN_URL = '/cuentas/login/?next=%2Ftalleres%2F';
-
 export async function obtenerCatalogo({ signal } = {}) {
   const response = await fetch('/api/participantes/talleres/', {
     signal,

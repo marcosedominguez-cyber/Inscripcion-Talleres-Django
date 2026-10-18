@@ -1,20 +1,29 @@
 """API de solo lectura consumida por el catálogo React."""
 
-from django.core.exceptions import FieldError, ImproperlyConfigured
+from django.core.exceptions import FieldError, ImproperlyConfigured, ObjectDoesNotExist
 from django.db import DatabaseError
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_safe
+from django.views.decorators.cache import never_cache
 
 from talleres.consultas_participantes import listar_talleres_proximos
+from talleres.models import Usuario
 
 
 @require_safe
+@never_cache
 def catalogo_talleres_api(request):
     if not request.user.is_authenticated:
         return JsonResponse({"detail": "Se requiere iniciar sesión."}, status=401)
 
     try:
+        try:
+            perfil = request.user.perfil
+        except ObjectDoesNotExist:
+            return JsonResponse({"detail": "Se requiere un perfil de participante."}, status=403)
+        if perfil.rol != Usuario.Rol.PARTICIPANTE:
+            return JsonResponse({"detail": "Esta sección es exclusiva para participantes."}, status=403)
         talleres = [
             {
                 "codigo": taller.codigo,

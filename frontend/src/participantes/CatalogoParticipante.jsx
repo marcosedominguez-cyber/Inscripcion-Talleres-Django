@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LOGIN_URL, obtenerCatalogo } from './api.js';
+import { obtenerCatalogo } from './api.js';
 import './catalogo.css';
 
 function FechaTaller({ valor, zona }) {
@@ -34,7 +34,9 @@ function TarjetaTaller({ taller, zona }) {
   );
 }
 
-export default function App({ cargarCatalogo = obtenerCatalogo }) {
+export default function CatalogoParticipante({
+  cargarCatalogo = obtenerCatalogo, usuario, onCerrarSesion, onSesionCaducada, enviando, error,
+}) {
   const [estado, setEstado] = useState({ tipo: 'cargando' });
   const [intento, setIntento] = useState(0);
 
@@ -46,19 +48,23 @@ export default function App({ cargarCatalogo = obtenerCatalogo }) {
       .then((datos) => {
         if (vigente) setEstado({ tipo: 'listo', datos });
       })
-      .catch((error) => {
-        if (vigente && error.name !== 'AbortError') {
-          setEstado({ tipo: error.status === 401 ? 'sin-sesion' : 'error' });
+      .catch((fallo) => {
+        if (vigente && fallo.name !== 'AbortError') {
+          if (fallo.status === 401) {
+            onSesionCaducada();
+          } else {
+            setEstado({ tipo: fallo.status === 403 ? 'sin-permiso' : 'error' });
+          }
         }
       });
     return () => {
       vigente = false;
       controller.abort();
     };
-  }, [cargarCatalogo, intento]);
+  }, [cargarCatalogo, intento, onSesionCaducada]);
 
   const datos = estado.tipo === 'listo' ? estado.datos : null;
-  const nombre = datos?.usuario?.nombre || 'Participante';
+  const nombre = datos?.usuario?.nombre || usuario.nombre_usuario;
 
   return (
     <div className="pw-app">
@@ -75,10 +81,14 @@ export default function App({ cargarCatalogo = obtenerCatalogo }) {
           <div className="pw-user">
             <span className="pw-avatar" aria-hidden="true">{nombre.charAt(0).toUpperCase()}</span>
             <span className="pw-user-name">{nombre}</span>
+            <button className="pw-logout" type="button" onClick={onCerrarSesion} disabled={enviando}>
+              {enviando ? 'Cerrando…' : 'Cerrar sesión'}
+            </button>
           </div>
         </div>
       </header>
       <main id="contenido" className="pw-main">
+        {error && <p className="pw-empty" role="alert">{error}</p>}
         <section className="pw-hero" aria-labelledby="titulo-catalogo">
           <div className="pw-hero-copy">
             <p className="pw-eyebrow"><span aria-hidden="true" /> UN ESPACIO PARA SEGUIR APRENDIENDO</p>
@@ -99,11 +109,10 @@ export default function App({ cargarCatalogo = obtenerCatalogo }) {
           </div>
           <p className="pw-help">Consultá las fechas y el cupo máximo de cada taller.</p>
           {estado.tipo === 'cargando' && <div className="pw-empty" role="status">Cargando talleres…</div>}
-          {estado.tipo === 'sin-sesion' && (
-            <div className="pw-empty" role="status">
-              <h3>Iniciá sesión para ver los talleres</h3>
-              <p>Tu sesión puede haber finalizado.</p>
-              <a className="pw-action" href={LOGIN_URL}>Ir a iniciar sesión</a>
+          {estado.tipo === 'sin-permiso' && (
+            <div className="pw-empty" role="alert">
+              <h3>No tienes permiso para consultar este catálogo</h3>
+              <p>Esta sección está disponible para participantes.</p>
             </div>
           )}
           {estado.tipo === 'error' && (

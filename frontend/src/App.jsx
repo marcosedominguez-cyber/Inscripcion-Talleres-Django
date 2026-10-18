@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from './api.js';
+import CatalogoParticipante from './participantes/CatalogoParticipante.jsx';
 
 export default function App() {
   const [pantalla, setPantalla] = useState('inicio');
@@ -10,12 +11,19 @@ export default function App() {
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
 
+  const sesionCaducada = useCallback(() => {
+    setUsuario(null);
+    setPantalla('login');
+    setError('Tu sesión finalizó. Inicia sesión nuevamente.');
+    setMensaje('');
+  }, []);
+
   useEffect(() => {
     let activo = true;
     api('sesion').then(({ usuario }) => {
       if (activo && usuario) {
         setUsuario(usuario);
-        setPantalla('cuenta');
+        setPantalla(usuario.rol === 'participante' ? 'catalogo' : 'cuenta');
       }
     }).catch((e) => { if (activo) setError(e.message); })
       .finally(() => { if (activo) setIniciando(false); });
@@ -50,7 +58,7 @@ export default function App() {
       } else {
         const result = await api('login', datos);
         setUsuario(result.usuario);
-        setPantalla('cuenta');
+        setPantalla(result.usuario.rol === 'participante' ? 'catalogo' : 'cuenta');
       }
     } catch (e) {
       setError(e instanceof TypeError ? 'No se pudo conectar con el servidor.' : e.message);
@@ -71,8 +79,13 @@ export default function App() {
     finally { setEnviando(false); }
   }
 
+  if (!iniciando && pantalla === 'catalogo' && usuario?.rol === 'participante') {
+    return <CatalogoParticipante usuario={usuario} onCerrarSesion={cerrarSesion}
+      onSesionCaducada={sesionCaducada} enviando={enviando} error={error} />;
+  }
+
   return (
-    <main>
+    <main className="acceso">
       <h1>Inscripción talleres</h1>
       {iniciando && <p role="status">Comprobando sesión…</p>}
       {error && <p className="error" role="alert">{error}</p>}
