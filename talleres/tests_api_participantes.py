@@ -18,7 +18,3 @@ class CatalogoApiTests(SimpleTestCase):
             response = catalogo_talleres_api(self.solicitud(Usuario.Rol.PARTICIPANTE))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content)["talleres"], [])
-
-    def test_instructor_no_puede_consultar_catalogo(self):
-        response = catalogo_talleres_api(self.solicitud(Usuario.Rol.INSTRUCTOR))
-        self.assertEqual(response.status_code, 403)

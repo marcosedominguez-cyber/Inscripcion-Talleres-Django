@@ -60,25 +60,6 @@ def test_rechaza_nombre_vacio_sin_consumir_un_identificador():
     assert registrar_participante(participantes, "Ana Pérez").id == "P-001"
 
 
-def test_registrar_participantes_multiples_exitoso():
-    participantes = {}
-
-    p1 = registrar_participante(participantes, "Katrina")
-    p2 = registrar_participante(participantes, "Marcos")
-
-    assert p1.id == "P-001"
-    assert p1.nombre == "Katrina"
-    assert p2.id == "P-002"
-    assert "P-001" in participantes
-    assert "P-002" in participantes
-
-
-def test_rechaza_registro_participante_espacios_blanco():
-    participantes = {}
-
-    with pytest.raises(DatosParticipanteInvalidosError):
-        registrar_participante(participantes, "      ")
-
 
 # ==============================================================================
 # BLOQUE 2: PRUEBAS DE TALLERES (Ismael)

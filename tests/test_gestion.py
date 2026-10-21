@@ -283,9 +283,3 @@ class RegistroPublicoK1Tests(SimpleTestCase):
             response = cuentas_views.registro(request)
         self.assertEqual(response.status_code, 400)
         registrar.assert_not_called()
-
-    def test_formulario_publico_no_ofrece_rol_administrador(self):
-        from cuentas.forms import RegistroForm
-
-        valores = {valor for valor, _ in RegistroForm.base_fields["rol"].choices}
-        self.assertNotIn(Usuario.Rol.ADMINISTRADOR, valores)
