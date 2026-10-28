@@ -20,6 +20,15 @@ export async function obtenerCatalogo({ signal } = {}) {
   return data;
 }
 
+export async function obtenerMisInscripciones({ signal } = {}) {
+  const data = await solicitudApi('/api/participantes/inscripciones/', { signal });
+  if (!Array.isArray(data.inscripciones) || typeof data.zona_horaria !== 'string') {
+    throw new Error('La respuesta de tus inscripciones no tiene el formato esperado.');
+  }
+  return data;
+}
+
+
 export function inscribirEnTaller(codigoTaller) {
   return solicitudApi('/api/participantes/inscripciones/', {
     method: 'POST', datos: { codigo_taller: codigoTaller },
@@ -29,6 +38,13 @@ export function inscribirEnTaller(codigoTaller) {
 
 export function solicitarEspera(codigoTaller) {
   return solicitudApi('/api/participantes/espera/', {
+    method: 'POST', datos: { codigo_taller: codigoTaller },
+  });
+}
+
+
+export function cancelarInscripcion(codigoTaller) {
+  return solicitudApi('/api/participantes/inscripciones/cancelar/', {
     method: 'POST', datos: { codigo_taller: codigoTaller },
   });
 }

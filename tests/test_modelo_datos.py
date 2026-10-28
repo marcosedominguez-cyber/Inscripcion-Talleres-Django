@@ -10,7 +10,7 @@ from django.utils import timezone
 from django_mongodb_backend.fields import ObjectIdAutoField
 
 from talleres import servicios
-from talleres.models import Contador, Inscripcion, Taller, Usuario
+from talleres.models import Cancelacion, Contador, Inscripcion, Taller, Usuario
 
 
 def test_modelos_de_negocio_usan_objectid_interno_y_referencias_objectid():
@@ -108,3 +108,15 @@ def test_espera_reutiliza_campos_y_estados_sin_nuevas_referencias():
     assert Inscripcion.Estado.EN_ESPERA == "en_espera"
     assert "en_espera" in dict(Inscripcion._meta.get_field("estado").choices)
     assert Inscripcion._meta.get_field("fecha_solicitud").auto_now_add
+
+
+def test_cancelacion_conserva_antecedente_y_bloqueo_derivado_del_contador():
+    assert Usuario._meta.get_field("cancelaciones_consecutivas").default == 0
+    assert Cancelacion._meta.db_table == "cancelaciones"
+    campos = {campo.name for campo in Cancelacion._meta.fields}
+    assert {
+        "participante", "taller", "codigo_taller", "nombre_taller",
+        "estado_anterior", "fecha_cancelacion",
+    } <= campos
+    assert Cancelacion._meta.ordering == ["-fecha_cancelacion", "-id"]
+    assert Cancelacion._meta.get_field("fecha_cancelacion").auto_now_add

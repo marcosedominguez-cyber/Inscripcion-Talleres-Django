@@ -2,7 +2,7 @@
 
 from django.utils import timezone
 
-from talleres.models import Inscripcion, Taller
+from talleres.models import Cancelacion, Inscripcion, Taller
 from talleres.reglas import inscripcion_abierta
 
 
@@ -22,6 +22,24 @@ def listar_talleres_proximos():
     )
     # Catálogo e inscripción usan la misma regla, incluido el instante límite.
     return [taller for taller in candidatos if inscripcion_abierta(taller.fecha_inicio, ahora)]
+
+
+def listar_inscripciones_participante(participante):
+    ahora = timezone.now()
+    return [
+        inscripcion
+        for inscripcion in Inscripcion.objects.filter(
+            participante=participante,
+            estado__in=(Inscripcion.Estado.CONFIRMADA, Inscripcion.Estado.EN_ESPERA),
+        ).select_related("taller", "taller__instructor")
+        if inscripcion.taller.fecha_fin > ahora
+    ]
+
+
+def listar_cancelaciones_participante(participante):
+    return list(Cancelacion.objects.filter(
+        participante=participante,
+    ).order_by("-fecha_cancelacion", "-id"))
 
 
 def listar_talleres_instructor(instructor):

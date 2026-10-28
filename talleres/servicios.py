@@ -10,8 +10,11 @@ from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
 
 from talleres.consultas import cupos_disponibles, consultar_espera
-from talleres.models import Contador, Inscripcion, Usuario, Taller
-from talleres.reglas import inscripcion_abierta, limite_espera
+from talleres.models import Cancelacion, Contador, Inscripcion, Usuario, Taller
+from talleres.reglas import (
+    LIMITE_CANCELACIONES_CONSECUTIVAS, cancelacion_abierta,
+    cuenta_bloqueada_para_inscripciones, inscripcion_abierta, limite_espera,
+)
 
 
 class ErrorNegocioTalleres(Exception):
@@ -48,6 +51,18 @@ class TallerNoAprobadoError(InscripcionError):
 
 class PlazoInscripcionVencidoError(InscripcionError):
     """El plazo de inscripción ya venció."""
+
+
+class CuentaBloqueadaError(InscripcionError):
+    """La cuenta acumuló el límite de cancelaciones consecutivas."""
+
+
+class InscripcionNoEncontradaError(InscripcionError, LookupError):
+    """No existe una inscripción activa del participante en el taller."""
+
+
+class PlazoCancelacionVencidoError(InscripcionError):
+    """El taller ya comenzó y no admite cancelaciones."""
 
 
 def transaccion_con_reintentos(funcion):
@@ -184,6 +199,13 @@ def _registrar_solicitud(ci, codigo_taller, *, espera):
         raise ParticipanteNoEncontradoError(
             f"No existe un participante con la CI {ci!r}."
         ) from None
+    if cuenta_bloqueada_para_inscripciones(
+        getattr(participante, "cancelaciones_consecutivas", 0)
+    ):
+        raise CuentaBloqueadaError(
+            "La cuenta está bloqueada para nuevas inscripciones por acumular "
+            f"{LIMITE_CANCELACIONES_CONSECUTIVAS} cancelaciones consecutivas."
+        )
     try:
         taller = Taller.objects.get(codigo=codigo_taller)
     except Taller.DoesNotExist:
@@ -225,3 +247,75 @@ def _registrar_solicitud(ci, codigo_taller, *, espera):
         raise InscripcionDuplicadaError(
             "El participante ya está inscrito en este taller."
         ) from None
+
+
+@transaccion_con_reintentos
+def cancelar_inscripcion(ci, codigo_taller):
+    """Cancela una inscripción activa y conserva su antecedente.
+
+    La plaza liberada se asigna a la primera persona en espera. La operación
+    devuelve la cancelación registrada y deja en ella si hubo promoción.
+    """
+    try:
+        participante = Usuario.objects.get(
+            ci=ci,
+            rol=Usuario.Rol.PARTICIPANTE,
+        )
+    except Usuario.DoesNotExist:
+        raise ParticipanteNoEncontradoError(
+            f"No existe un participante con la CI {ci!r}."
+        ) from None
+    try:
+        taller = Taller.objects.get(codigo=codigo_taller)
+    except Taller.DoesNotExist:
+        raise TallerNoEncontradoError(
+            f"No existe un taller con el código {codigo_taller!r}."
+        ) from None
+    if not cancelacion_abierta(taller.fecha_inicio, timezone.now()):
+        raise PlazoCancelacionVencidoError(
+            "El taller ya comenzó; no se puede cancelar la inscripción."
+        )
+    inscripcion = Inscripcion.objects.filter(
+        participante=participante, taller=taller
+    ).first()
+    if inscripcion is None:
+        raise InscripcionNoEncontradaError(
+            "No existe una inscripción activa en este taller."
+        )
+
+    estado_anterior = inscripcion.estado
+    # Escritura real compartida para que las operaciones sobre el mismo taller
+    # detecten conflictos dentro de la transacción MongoDB.
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") + 1)
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") - 1)
+    cancelacion = Cancelacion.objects.create(
+        participante=participante,
+        taller=taller,
+        codigo_taller=taller.codigo,
+        nombre_taller=taller.nombre,
+        estado_anterior=estado_anterior,
+    )
+    Usuario.objects.filter(pk=participante.pk).update(
+        cancelaciones_consecutivas=F("cancelaciones_consecutivas") + 1
+    )
+    total_cancelaciones = (
+        getattr(participante, "cancelaciones_consecutivas", 0) or 0
+    ) + 1
+    participante.cancelaciones_consecutivas = total_cancelaciones
+    inscripcion.delete()
+
+    promovido = None
+    if estado_anterior == Inscripcion.Estado.CONFIRMADA:
+        promovido = Inscripcion.objects.filter(
+            taller=taller, estado=Inscripcion.Estado.EN_ESPERA,
+        ).order_by("fecha_solicitud", "id").first()
+        if promovido is not None:
+            promovido.estado = Inscripcion.Estado.CONFIRMADA
+            promovido.save(update_fields=["estado"])
+
+    cancelacion.promovido = promovido is not None
+    cancelacion.cancelaciones_consecutivas = total_cancelaciones
+    cancelacion.cuenta_bloqueada = cuenta_bloqueada_para_inscripciones(
+        total_cancelaciones
+    )
+    return cancelacion
