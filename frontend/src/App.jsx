@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api } from './api.js';
+import { api } from './cuentas/api.js';
+import InstructorPanel from './gestion/InstructorPanel.jsx';
 import CatalogoParticipante from './participantes/CatalogoParticipante.jsx';
-import InstructorPanel from './InstructorPanel.jsx';
 
 export default function App() {
   const [pantalla, setPantalla] = useState('inicio');

@@ -1,9 +1,9 @@
 from django.contrib.auth import get_user_model
 from talleres.models import Usuario
-from talleres.services import _transaccion
+from talleres.servicios import transaccion_con_reintentos
 
 
-@_transaccion
+@transaccion_con_reintentos
 def registrar_cuenta(*, nombre_usuario, ci, contrasena, rol):
     if rol not in (Usuario.Rol.PARTICIPANTE, Usuario.Rol.INSTRUCTOR):
         raise ValueError("El registro público no permite ese rol.")

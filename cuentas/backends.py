@@ -9,7 +9,7 @@ class CIBackend(ModelBackend):
             return None
         try:
             perfil = Usuario.objects.select_related("cuenta").get(ci=ci)
-        except Usuario.DoesNotExist:
+        except (Usuario.DoesNotExist, Usuario.MultipleObjectsReturned):
             perfil = None
         cuenta = perfil.cuenta if perfil and perfil.cuenta_id else None
         if cuenta is None:

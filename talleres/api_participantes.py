@@ -1,36 +1,48 @@
 """API de solo lectura consumida por el catálogo React."""
 
-from django.core.exceptions import FieldError, ImproperlyConfigured, ObjectDoesNotExist
+import json
+
+from django.core.exceptions import FieldError, ImproperlyConfigured
 from django.db import DatabaseError
 from django.http import JsonResponse
-import json
 from django.utils import timezone
-from django.views.decorators.http import require_POST, require_safe
 from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_POST, require_safe
 from pymongo.errors import PyMongoError
 
-from talleres.consultas_participantes import listar_talleres_proximos
+from talleres.api_comun import perfil_autorizado
+from talleres.consultas import cupos_disponibles, listar_talleres_proximos
 from talleres.models import Usuario
-from proyecto.reglas_inscripciones import (
+from talleres.servicios import (
     CupoAgotadoError, InscripcionDuplicadaError, ParticipanteNoEncontradoError,
     PlazoInscripcionVencidoError, TallerNoAprobadoError, TallerNoEncontradoError,
+    inscribir_participante,
 )
-from talleres.services import cupos_disponibles, inscribir_participante
+
+
+def _participante(request, mensaje_rol):
+    perfil, error = perfil_autorizado(
+        request,
+        Usuario.Rol.PARTICIPANTE,
+        mensaje_sin_perfil="Se requiere un perfil de participante.",
+        mensaje_rol=mensaje_rol,
+    )
+    if error:
+        mensaje, estado = error
+        return None, JsonResponse({"detail": mensaje}, status=estado)
+    return perfil, None
 
 
 @require_safe
 @never_cache
 def catalogo_talleres_api(request):
-    if not request.user.is_authenticated:
-        return JsonResponse({"detail": "Se requiere iniciar sesión."}, status=401)
+    _, error = _participante(
+        request, "Esta sección es exclusiva para participantes."
+    )
+    if error:
+        return error
 
     try:
-        try:
-            perfil = request.user.perfil
-        except ObjectDoesNotExist:
-            return JsonResponse({"detail": "Se requiere un perfil de participante."}, status=403)
-        if perfil.rol != Usuario.Rol.PARTICIPANTE:
-            return JsonResponse({"detail": "Esta sección es exclusiva para participantes."}, status=403)
         talleres = [
             {
                 "codigo": taller.codigo,
@@ -61,14 +73,11 @@ def catalogo_talleres_api(request):
 @never_cache
 def inscripcion_participante_api(request):
     """Inscribe al participante autenticado; la identidad nunca viene del cliente."""
-    if not request.user.is_authenticated:
-        return JsonResponse({"detail": "Se requiere iniciar sesión."}, status=401)
-    try:
-        perfil = request.user.perfil
-    except ObjectDoesNotExist:
-        return JsonResponse({"detail": "Se requiere un perfil de participante."}, status=403)
-    if perfil.rol != Usuario.Rol.PARTICIPANTE:
-        return JsonResponse({"detail": "Esta operación es exclusiva para participantes."}, status=403)
+    perfil, error = _participante(
+        request, "Esta operación es exclusiva para participantes."
+    )
+    if error:
+        return error
     if not perfil.ci:
         return JsonResponse({"detail": "El perfil no tiene una identificación válida."}, status=403)
     try:

@@ -2,9 +2,11 @@ import React from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App.jsx';
-import { api, solicitudApi } from './api.js';
+import { solicitudApi } from './api.js';
+import { api } from './cuentas/api.js';
 
-vi.mock('./api.js', () => ({ api: vi.fn(), solicitudApi: vi.fn() }));
+vi.mock('./api.js', () => ({ solicitudApi: vi.fn() }));
+vi.mock('./cuentas/api.js', () => ({ api: vi.fn() }));
 beforeEach(() => {
   api.mockReset();
   solicitudApi.mockReset();

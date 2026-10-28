@@ -7,11 +7,12 @@ Aplicación para publicar talleres con cupos limitados, revisar propuestas de in
 - Registro de cuentas de participante o instructor con nombre de usuario, CI numérica y contraseña; inicio de sesión con CI y contraseña; y cierre de sesión con sesión Django.
 - El registro público no permite asignar rol administrador ni privilegios de `staff`.
 - Catálogo web de talleres aprobados, futuros y con plazas disponibles, visible a participantes autenticados.
-- Inscripción del participante autenticado. El servidor comprueba rol, taller aprobado, fecha límite (un minuto antes del inicio), duplicados y plazas disponibles. La capacidad se controla dentro de una transacción.
+- Inscripción del participante autenticado. El servidor comprueba rol, taller aprobado, fecha límite (un minuto antes del inicio), duplicados y plazas disponibles. La capacidad se controla dentro de una transacción con bloqueo lógico del taller.
+- Reglas de taller: cupo entre 4 y 40 personas y duración entre 24 horas y 7 días; las fechas se almacenan en UTC y se interpretan/muestran en `America/La_Paz`.
 - Panel de instructor para proponer talleres, ver sus propuestas y plazas, y editar una propuesta propia. Al editar, vuelve a estado pendiente de aprobación.
 - Django Admin (`/admin/`) para personal autorizado con rol administrador. Permite consultar registros y usar acciones para aprobar o rechazar talleres pendientes.
 - En la aplicación de terminal hay registro de participantes y talleres, listado de ambos, consulta de inscripciones y alta de inscripción. Las inscripciones del menú también requieren taller aprobado.
-- Persistencia MongoDB mediante el backend Django para MongoDB. Los datos de negocio usan las colecciones `participantes`, `talleres`, `inscripciones` y `contadores`.
+- Persistencia MongoDB mediante el backend Django para MongoDB. Los datos de negocio usan las colecciones `participantes`, `talleres`, `inscripciones` y `contadores`; este último mantiene la secuencia de códigos de talleres.
 
 ### No implementado en el estado inspeccionado
 
@@ -64,6 +65,7 @@ Reemplaza `<URL_DEL_REPOSITORIO>` con la URL de clonación proporcionada para es
 
 | Variable | Uso |
 | --- | --- |
+| `SECRET_KEY` | Clave secreta de Django; usa un valor aleatorio y no la publiques. |
 | `MONGODB_URI` | URI de conexión de tu clúster/servidor MongoDB. Incluye el usuario y la clave del usuario de base de datos en el formato entregado por Atlas. |
 | `MONGODB_DATABASE` | Nombre de la base que usará la aplicación. |
 | `DJANGO_DEBUG` | Activa el modo de depuración solo para desarrollo local (`True`/`False`). |
@@ -119,11 +121,11 @@ Con el mismo entorno y `.env`, desde la raíz:
 python -m proyecto.main
 ```
 
-El menú solicita participantes, talleres, inscripciones y listados; sus fechas se interpretan en UTC. Este flujo usa la configuración principal y la misma base persistente. Las propuestas creadas por el menú también quedan pendientes hasta su aprobación en Admin antes de permitir nuevas inscripciones.
+El menú solicita participantes, talleres, inscripciones y listados; sus fechas se interpretan en la zona horaria `America/La_Paz`. Este flujo usa la configuración principal y la misma base persistente. Las propuestas creadas por el menú también quedan pendientes hasta su aprobación en Admin antes de permitir nuevas inscripciones.
 
 ## Pruebas y validación
 
-La configuración de Python usa **pytest y pytest-django** (`pytest.ini`). Por defecto, `config/settings_test_api_participantes.py` configura SQLite en memoria, sin cargar `.env` ni conectar a Atlas. El workflow de CI instala `requirements-ci.txt` y ejecuta tres casos de `tests/test_reglas.py`; eso no representa una ejecución realizada al redactar este README.
+La configuración de Python usa **pytest y pytest-django** (`pytest.ini`). Por defecto, `config/settings_test_api_participantes.py` configura SQLite en memoria, sin cargar `.env` ni conectar a Atlas. El workflow de CI instala `requirements.txt` y ejecuta la suite completa de backend y frontend; las pruebas con MongoDB local y el script de Atlas no forman parte de esa ejecución.
 
 Comandos disponibles según la configuración:
 
@@ -137,23 +139,25 @@ cd frontend
 npm test
 ```
 
-Existe además `config/settings_test_mongodb_local.py`, que apunta a `mongodb://127.0.0.1:27017` y a una base de pruebas local fija; `tests/mongodb/test_migration_estado_aprobacion.py` corresponde a ese nivel. Úsalo únicamente con una instancia local desechable tras revisar qué datos altera. `tests/verificar_atlas.py` requiere Atlas y, según el README anterior, crea y elimina una base temporal `test_cli_*`; no forma parte de la configuración pytest predeterminada.
+Existe además `config/settings_test_mongodb_local.py`, que apunta a `mongodb://127.0.0.1:27017` y a una base de pruebas local fija; `tests/mongodb/test_migration_estado_aprobacion.py` corresponde a ese nivel. Úsalo únicamente con una instancia local desechable tras revisar qué datos altera. `scripts/verificar_atlas.py` requiere Atlas y, según el README anterior, crea y elimina una base temporal `test_cli_*`; no forma parte de la configuración pytest predeterminada.
 
 ## Estructura principal
 
 | Ruta | Contenido |
 | --- | --- |
-| `config/` | Configuración Django, URLs, WSGI/ASGI y settings específicos de pruebas. |
+| `config/` | Configuración Django, URLs, WSGI/ASGI, settings de pruebas y vista del shell SPA (`vistas.py`). |
 | `cuentas/` | Formularios, servicios, backend CI/contraseña, vistas y rutas de registro/sesión. |
 | `talleres/models.py` | Modelos de usuarios/perfiles, talleres, inscripciones y contadores. |
-| `talleres/services.py` | Operaciones persistentes, cupos, creación y validaciones de inscripción. |
-| `talleres/api_participantes.py`, `consultas_participantes.py` | Catálogo e inscripción API para participantes. |
-| `talleres/api_gestion.py`, `urls_gestion.py`, `forms_gestion.py` | Gestión API de propuestas por instructores. |
+| `talleres/reglas.py`, `servicios.py` | Reglas compartidas, casos de uso persistentes, transacciones reintentables y errores web. |
+| `talleres/consultas.py` | Consultas de lectura de catálogo, disponibilidad, talleres del instructor y confirmadas. |
+| `talleres/api_participantes.py`, `api_gestion.py`, `api_comun.py` | Endpoints de participantes y gestión, más autorización compartida. |
+| `talleres/urls.py`, `formularios_gestion.py` | Rutas HTTP y formularios de validación de gestión. |
 | `talleres/admin.py`, `admin_site.py` | Administración de registros y acciones de aprobación/rechazo. |
 | `talleres/migrations/`, `mongo_migrations/` | Migraciones de los modelos y de apps Django adaptadas al backend MongoDB. |
-| `frontend/src/` | Aplicación React, catálogo, panel de instructor, cliente API y pruebas Vitest. |
-| `proyecto/main.py`, `proyecto/reglas*.py` | Menú de terminal y reglas de dominio en memoria. |
-| `tests/`, `talleres/tests_api_participantes.py` | Pruebas de reglas, cuentas, gestión, API y migraciones. |
+| `frontend/src/cuentas/`, `gestion/`, `participantes/` | Cliente API y componentes React separados por área funcional; `api.js` contiene el transporte HTTP común. |
+| `proyecto/main.py`, `proyecto/reglas*.py` | Menú de terminal y reglas de dominio en memoria; programa independiente. |
+| `scripts/` | Verificación manual destructiva contra una base temporal de Atlas; no es una prueba automática. |
+| `tests/` | Pruebas web, reglas CLI y pruebas de migración MongoDB local. |
 | `docs/` | Requisitos, modelos, planificación y notas de arquitectura del proyecto. |
 
 
@@ -163,7 +167,7 @@ Existe además `config/settings_test_mongodb_local.py`, que apunta a `mongodb://
 - **`npm run dev` dice que falta `package.json`:** entra primero a `frontend/` y ejecuta `npm ci`; después vuelve a ejecutar `npm run dev` allí.
 - **Vite no puede enlazar el puerto:** el puerto 5173 es estricto. Cierra el proceso que ya lo ocupa o libera ese puerto; la configuración actual no selecciona otro automáticamente.
 - **Django no puede enlazar el puerto 8000:** detén el proceso que lo ocupa. Si configuras otro puerto, actualiza también `server.proxy` en `frontend/vite.config.js`; el proxy actual apunta al 8000.
-- **Error por variables ausentes:** confirma que existe `.env` en la raíz y que contiene `MONGODB_URI` y `MONGODB_DATABASE`. Django los lee al importar `config/settings.py`; no pegues sus valores en reportes.
+- **Error por variables ausentes:** confirma que existe `.env` en la raíz y que contiene `SECRET_KEY`, `MONGODB_URI` y `MONGODB_DATABASE`. Django los lee al importar `config/settings.py`; no pegues sus valores en reportes.
 - **Atlas no conecta o agota el tiempo:** verifica URI, usuario/contraseña del usuario de base de datos, nombre de base, acceso de red/IP permitida y estado del clúster. Si falla una inscripción, revisa también que el clúster admita transacciones.
 - **Error CSRF al enviar formularios:** comprueba que `DJANGO_CSRF_TRUSTED_ORIGINS` incluya exactamente el origen local usado (esquema y puerto) y recarga la página para obtener un token nuevo.
 - **Admin muestra acceso denegado:** se requiere usuario activo, `is_staff=True` y perfil de aplicación con rol `administrador`; una cuenta registrada desde la interfaz no cumple esos requisitos automáticamente.

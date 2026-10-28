@@ -27,8 +27,8 @@ La versión integrada en `main` desde `migration/django-atlas` contiene un menú
 
 | Componente | Responsabilidad | Código existente | Interfaz que usa |
 |---|---|---|---|
-| Menú | Recibir códigos y mostrar resultado/error | `proyecto/main.py`, `ejecutar()`, opción 4 | `talleres.services.inscribir_participante()` |
-| Servicio persistente | Buscar entidades, validar duplicado/cupo y guardar | `talleres/services.py`, `inscribir_participante()` | Modelos Django, `cupos_disponibles()` y `_transaccion` |
+| Menú | Recibir códigos y mostrar resultado/error | `proyecto/main.py`, `ejecutar()`, opción 4 | `talleres.servicios.inscribir_participante()` |
+| Servicio persistente | Buscar entidades, validar duplicado/cupo y guardar | `talleres/servicios.py`, `inscribir_participante()` | Modelos Django, `cupos_disponibles()` y `transaccion_con_reintentos` |
 | Modelos/almacenamiento | Definir registros y acceder a MongoDB | `talleres/models.py`, backend configurado en `config/settings.py` | ORM de Django y backend MongoDB |
 | Reglas en memoria | Validar y agregar una inscripción a una lista | `proyecto/reglas_inscripciones.py`, `inscribir_participante()`; exportada por `proyecto/reglas.py` | Diccionarios, listas y objetos de datos; usada por los tests |
 
@@ -54,7 +54,7 @@ inscribir_participante(participante_id, taller_id, participantes, talleres, insc
 - **Consulta/escritura en tests:** la función consulta los datos recibidos y hace `append` solo después de validar. No escribe en MongoDB.
 - **Importación:** importar `proyecto.reglas` permite probar sin teclado, Django ni conexión real.
 
-**Contrato usado por el menú:** `talleres.services.inscribir_participante(codigo_participante, codigo_taller)`. Busca modelos y devuelve una inscripción persistente creada mediante el ORM. Usa `_transaccion` para coordinar la operación; su rollback y concurrencia reales no se verifican con los tres tests seleccionados.
+**Contrato usado por el menú:** `talleres.servicios.inscribir_participante(codigo_participante, codigo_taller)`. Busca modelos y devuelve una inscripción persistente creada mediante el ORM. Usa `transaccion_con_reintentos` para coordinar la operación; su rollback y concurrencia reales no se verifican con los tres tests seleccionados.
 
 ## 4. Vistas del mismo flujo
 
@@ -116,6 +116,7 @@ flowchart TD
 ## 6. Cambio y trazabilidad de las pruebas
 
 - **Cambio real:** workflow y dependencias de CI; commit `ecda04777d47c4be38d45db5e2d444cee1db7575` selecciona exactamente tres tests. El commit anterior `c0cf924` añadió la configuración inicial.
+- **Nota de auditoría posterior:** el workflow actual ejecuta la suite completa de backend y frontend; esta sección conserva el registro histórico de la selección original de tres casos.
 - **Código de negocio:** no se cambió en esta intervención.
 - **Reglas:** se conserva el comportamiento existente; no se aprobaron nuevas políticas ni se editaron los requisitos/modelos.
 

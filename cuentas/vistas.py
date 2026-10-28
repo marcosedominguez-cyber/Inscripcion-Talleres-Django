@@ -7,14 +7,12 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import DatabaseError, IntegrityError
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
-from django.shortcuts import render
-from django.template import TemplateDoesNotExist
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 from pymongo.errors import PyMongoError
 
 from .forms import LoginForm, RegistroForm
-from .services import registrar_cuenta
+from .servicios import registrar_cuenta
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +57,8 @@ def sesion(request):
     token = get_token(request)
     if not request.user.is_authenticated:
         return JsonResponse({"usuario": None, "csrfToken": token})
+    if not request.user.is_active:
+        return JsonResponse({"mensaje": "La cuenta está inactiva."}, status=403)
     try:
         usuario = perfil_json(request.user)
     except ObjectDoesNotExist:
@@ -112,16 +112,3 @@ def ingresar(request):
 def salir(request):
     logout(request)
     return JsonResponse({"mensaje": "Sesión cerrada.", "csrfToken": get_token(request)})
-
-
-def csrf_error(request, reason=""):
-    return JsonResponse({"mensaje": "La sesión del formulario caducó. Recarga la página e intenta nuevamente."}, status=403)
-
-
-@require_GET
-@never_cache
-def frontend(request):
-    try:
-        return render(request, "index.html")
-    except TemplateDoesNotExist:
-        return JsonResponse({"mensaje": "Compila React en frontend con npm install y npm run build, o inicia npm run dev."}, status=503)

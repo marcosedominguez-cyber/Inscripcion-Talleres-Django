@@ -1,10 +1,12 @@
-"""Datos persistentes del sistema de terminal, almacenados en MongoDB Atlas."""
+"""Modelos persistentes de la aplicación web en MongoDB."""
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django_mongodb_backend.fields import ObjectIdAutoField
+
+from talleres.reglas import CUPO_MAXIMO, CUPO_MINIMO, error_duracion
 
 
 class Usuario(models.Model):
@@ -14,10 +16,8 @@ class Usuario(models.Model):
         ADMINISTRADOR = "administrador", "Administrador del sistema"
 
     id = ObjectIdAutoField(primary_key=True)
-    # Solo para compatibilidad con registros de terminal anteriores a las cuentas.
-    codigo = models.CharField(max_length=32, unique=True, null=True, blank=True)
     nombre = models.CharField(max_length=200)
-    ci = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    ci = models.CharField(max_length=20, unique=True)
     cuenta = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
         related_name="perfil", null=True, blank=True,
@@ -30,25 +30,18 @@ class Usuario(models.Model):
 
     def clean(self):
         super().clean()
-        self.codigo = (self.codigo.strip() or None) if self.codigo else None
-        self.ci = (self.ci.strip() or None) if self.ci else None
+        self.ci = self.ci.strip() if self.ci else self.ci
         self.nombre = self.nombre.strip()
         errores = {}
-        if self.cuenta_id and (not self.ci or not self.ci.isascii() or not self.ci.isdecimal()):
-            errores["ci"] = "La CI de una cuenta debe contener solo números."
-        if not self.cuenta_id and not self.codigo:
-            errores["codigo"] = "Un registro anterior sin cuenta debe conservar su código."
+        if not self.ci or not self.ci.isascii() or not self.ci.isdecimal():
+            errores["ci"] = "La CI debe contener solo números."
         if not self.nombre:
             errores["nombre"] = "El nombre del usuario es obligatorio."
         if errores:
             raise ValidationError(errores)
 
     def __str__(self):
-        return f"{self.ci or self.codigo or self.pk} - {self.nombre}"
-
-
-# Compatibilidad de importación: es el mismo modelo, no otra colección.
-Participante = Usuario
+        return f"{self.ci or self.pk} - {self.nombre}"
 
 
 class Taller(models.Model):
@@ -61,10 +54,18 @@ class Taller(models.Model):
     codigo = models.CharField(max_length=32, unique=True)
     nombre = models.CharField(max_length=200)
     descripcion = models.TextField(blank=True, default="")
-    cupos = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    cupos = models.PositiveIntegerField(validators=[
+        MinValueValidator(
+            CUPO_MINIMO,
+            message=f"El cupo debe ser al menos {CUPO_MINIMO}.",
+        ),
+        MaxValueValidator(
+            CUPO_MAXIMO,
+            message=f"El cupo no puede superar {CUPO_MAXIMO}.",
+        ),
+    ])
     fecha_inicio = models.DateTimeField()
     fecha_fin = models.DateTimeField()
-    revision = models.PositiveIntegerField(default=0, editable=False)
     instructor = models.ForeignKey(
         Usuario, on_delete=models.PROTECT, related_name="talleres_propios",
         null=True, blank=True, limit_choices_to={"rol": Usuario.Rol.INSTRUCTOR},
@@ -99,8 +100,9 @@ class Taller(models.Model):
             errores["nombre"] = "El nombre del taller es obligatorio."
         if self.instructor_id and self.instructor.rol != Usuario.Rol.INSTRUCTOR:
             errores["instructor"] = "El propietario del taller debe ser instructor."
-        if self.fecha_inicio and self.fecha_fin and self.fecha_fin <= self.fecha_inicio:
-            errores["fecha_fin"] = "El fin debe ser posterior al inicio del taller."
+        error_fechas = error_duracion(self.fecha_inicio, self.fecha_fin)
+        if error_fechas:
+            errores["fecha_fin"] = error_fechas
         if errores:
             raise ValidationError(errores)
 
@@ -140,7 +142,7 @@ class Inscripcion(models.Model):
 
 
 class Contador(models.Model):
-    """Secuencias compartidas para los códigos visibles P-001 y T-001."""
+    """Secuencias para los códigos visibles de talleres."""
 
     id = ObjectIdAutoField(primary_key=True)
     nombre = models.CharField(max_length=32, unique=True)

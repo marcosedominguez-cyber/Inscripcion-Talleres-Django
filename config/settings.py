@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,20 +21,35 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _env_requerida(nombre):
+    valor = os.getenv(nombre, "").strip()
+    if not valor:
+        raise ImproperlyConfigured(
+            f"Falta la variable de entorno obligatoria {nombre}."
+        )
+    return valor
+
+
+def _lista_env(nombre, predeterminado):
+    valores = os.getenv(nombre, predeterminado).split(",")
+    return [valor.strip() for valor in valores if valor.strip()]
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-a3m+reyg)51ikflafrc@idt0^u4%1yc8czb@7!1)%_(qkef&kf'
+SECRET_KEY = _env_requerida("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-CSRF_TRUSTED_ORIGINS = os.getenv(
-    "DJANGO_CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-).split(",")
-CSRF_FAILURE_VIEW = "cuentas.views.csrf_error"
+ALLOWED_HOSTS = _lista_env("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+CSRF_TRUSTED_ORIGINS = _lista_env(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+)
+CSRF_FAILURE_VIEW = "config.vistas.csrf_error"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 AUTHENTICATION_BACKENDS = [
@@ -92,8 +108,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django_mongodb_backend',
-        'HOST': os.environ['MONGODB_URI'],
-        'NAME': os.environ['MONGODB_DATABASE'],
+        'HOST': _env_requerida("MONGODB_URI"),
+        'NAME': _env_requerida("MONGODB_DATABASE"),
         'OPTIONS': {'serverSelectionTimeoutMS': 5000, 'connectTimeoutMS': 5000},
     },
 }
@@ -126,7 +142,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'es'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/La_Paz'
 
 USE_I18N = True
 
@@ -136,7 +152,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'frontend' / 'dist'] if (BASE_DIR / 'frontend' / 'dist').exists() else []
 
