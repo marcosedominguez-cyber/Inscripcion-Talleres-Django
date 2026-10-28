@@ -28,3 +28,8 @@ def limite_inscripcion(fecha_inicio):
 
 def inscripcion_abierta(fecha_inicio, ahora):
     return ahora < limite_inscripcion(fecha_inicio)
+
+
+def limite_espera(cupos):
+    """Máximo entero que no supera el veinte por ciento."""
+    return cupos // 5

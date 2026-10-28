@@ -26,3 +26,6 @@ body { margin: 0; }
 .lista-talleres h3 { display: flex; justify-content: space-between; gap: 12px; }
 .lista-talleres small { color: #555; }
 @media (max-width: 480px) { .acceso { margin-top: 32px; } }
+
+.gestion-instructor ol { padding-left: 1.5rem; }
+.gestion-instructor li { margin-block: .5rem; overflow-wrap: anywhere; }

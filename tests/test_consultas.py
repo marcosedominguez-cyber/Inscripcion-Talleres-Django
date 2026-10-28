@@ -39,3 +39,26 @@ class ConsultasInstructorTests(SimpleTestCase):
         manager.filter.return_value.values_list.assert_called_once_with(
             "pk", flat=True
         )
+
+
+class ConsultaEsperaTests(SimpleTestCase):
+    def test_ordena_por_fecha_y_id_y_filtra_taller_y_estado(self):
+        from talleres.consultas import consultar_espera
+        with patch.object(Inscripcion, "objects") as manager:
+            manager.filter.return_value.order_by.return_value = ["primero", "segundo"]
+            self.assertEqual(consultar_espera("t"), ["primero", "segundo"])
+            manager.filter.assert_called_once_with(taller="t", estado=Inscripcion.Estado.EN_ESPERA)
+            manager.filter.return_value.order_by.assert_called_once_with("fecha_solicitud", "id")
+
+    def test_posicion_y_disponibilidad_personales(self):
+        from types import SimpleNamespace
+        from talleres.consultas import resumen_espera
+        taller = SimpleNamespace(cupos=10)
+        participante = SimpleNamespace(pk="p2")
+        solicitudes = [SimpleNamespace(participante_id="p1"), SimpleNamespace(participante_id="p2")]
+        with patch("talleres.consultas.consultar_espera", return_value=solicitudes), \
+             patch.object(Inscripcion, "objects") as manager:
+            manager.filter.return_value.first.return_value = SimpleNamespace(estado="en_espera")
+            datos = resumen_espera(taller, participante)
+        self.assertEqual(datos, {"limite_espera": 2, "lugares_espera": 0,
+                                "mi_estado": "en_espera", "posicion_espera": 2})

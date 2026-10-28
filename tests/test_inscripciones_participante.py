@@ -66,7 +66,7 @@ class ServicioInscripcionTests(SimpleTestCase):
         )
         self.assertEqual(resultado.pk, "inscripcion-id")
         usuarios.get.assert_called_once()
-        talleres.filter.assert_called_once_with(pk=taller.pk)
+        self.assertEqual(talleres.filter.call_count, 2)
         inscripciones.create.assert_called_once_with(participante=participante, taller=taller)
 
     def test_rechaza_inscripcion_en_el_limite_exacto_de_un_minuto(self):
@@ -181,3 +181,68 @@ class ApiInscripcionParticipanteTests(SimpleTestCase):
             )
         self.assertEqual(response.status_code, 409)
         self.assertEqual(json.loads(response.content)["detail"], "No hay cupos.")
+
+
+class ServicioEsperaTests(SimpleTestCase):
+    def ejecutar(self, *, cupos=10, ocupadas=0, disponibles=0, duplicada=False):
+        taller = SimpleNamespace(pk="t", cupos=cupos,
+            estado_aprobacion=Taller.Aprobacion.APROBADO,
+            fecha_inicio=ServicioInscripcionTests.ahora + timedelta(days=1))
+        self.escrituras = Mock()
+        self.inscripciones = Mock()
+        self.inscripciones.filter.return_value.exists.return_value = duplicada
+        self.inscripciones.create.return_value = SimpleNamespace(pk="nueva")
+        with patch.object(servicios, "atomic", return_value=nullcontext()), \
+             patch.object(servicios.Usuario, "objects") as usuarios, \
+             patch.object(servicios.Taller, "objects", self.escrituras), \
+             patch.object(servicios.Inscripcion, "objects", self.inscripciones), \
+             patch.object(servicios, "cupos_disponibles", return_value=disponibles), \
+             patch.object(servicios, "consultar_espera", side_effect=[[None] * ocupadas, [SimpleNamespace(pk="nueva")]]), \
+             patch.object(servicios.timezone, "now", return_value=ServicioInscripcionTests.ahora):
+            usuarios.get.return_value = SimpleNamespace(pk="p")
+            self.escrituras.get.return_value = taller
+            return servicios.solicitar_espera("123", "T-001")
+
+    def test_admite_ultimo_lugar_sin_consumir_plaza_confirmada(self):
+        self.ejecutar(ocupadas=1)
+        self.assertEqual(self.inscripciones.create.call_args.kwargs["estado"], Inscripcion.Estado.EN_ESPERA)
+
+    def test_rechazos_no_escriben_ni_reordenan(self):
+        for opciones, error in [
+            ({"ocupadas": 2}, servicios.ListaEsperaLlenaError),
+            ({"cupos": 4}, servicios.ListaEsperaLlenaError),
+            ({"disponibles": 1}, servicios.TallerConCuposError),
+            ({"duplicada": True}, InscripcionDuplicadaError),
+        ]:
+            with self.subTest(opciones=opciones), self.assertRaises(error):
+                self.ejecutar(**opciones)
+            self.inscripciones.create.assert_not_called()
+            self.escrituras.filter.assert_not_called()
+
+    def test_redondeo(self):
+        from talleres.reglas import limite_espera
+        for cupos, esperado in [(4, 0), (5, 1), (9, 1), (10, 2), (14, 2), (40, 8)]:
+            self.assertEqual(limite_espera(cupos), esperado)
+
+
+class ApiEsperaTests(SimpleTestCase):
+    setUp = ApiInscripcionParticipanteTests.setUp
+    solicitar = ApiInscripcionParticipanteTests.solicitar
+
+    def test_espera_usa_sesion_y_rechaza_suplantacion(self):
+        from talleres.api_participantes import espera_participante_api
+        user = SimpleNamespace(is_authenticated=True, is_active=True,
+            perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE, ci="123"))
+        with patch("talleres.api_participantes.solicitar_espera",
+                   return_value=SimpleNamespace(pk="i", estado="en_espera")) as guardar:
+            response = espera_participante_api(self.solicitar(user, {"codigo_taller": "T-1"}))
+            self.assertEqual(response.status_code, 201)
+            guardar.assert_called_once_with("123", "T-1")
+            self.assertEqual(json.loads(response.content)["inscripcion"]["estado"], "en_espera")
+            self.assertEqual(espera_participante_api(self.solicitar(user,
+                {"codigo_taller": "T-1", "ci": "otra"})).status_code, 400)
+        self.assertEqual(espera_participante_api(self.solicitar()).status_code, 401)
+        with patch("talleres.api_participantes.solicitar_espera",
+                   side_effect=servicios.ListaEsperaLlenaError("Llena")):
+            self.assertEqual(espera_participante_api(self.solicitar(user,
+                {"codigo_taller": "T-1"})).status_code, 409)

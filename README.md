@@ -173,3 +173,34 @@ Existe además `config/settings_test_mongodb_local.py`, que apunta a `mongodb://
 - **Admin muestra acceso denegado:** se requiere usuario activo, `is_staff=True` y perfil de aplicación con rol `administrador`; una cuenta registrada desde la interfaz no cumple esos requisitos automáticamente.
 - **La página raíz responde que falta `index.html`:** compila React con `npm run build` desde `frontend/`, o usa el servidor de desarrollo Vite en otra terminal. La compilación no se ejecutó como parte de esta tarea.
 
+
+
+### Lista de espera web
+
+El catálogo incluye talleres aprobados con inscripción abierta aunque estén llenos.
+El participante puede solicitar espera y consultar su posición al recargar el catálogo.
+El instructor consulta la lista ordenada únicamente de sus propios talleres.
+
+- Capacidad: `cupos // 5` (20 % redondeado hacia abajo; cupo 4 admite cero).
+- Prioridad: `fecha_solicitud` UTC y ObjectId ascendente para desempatar.
+  El desempate es determinista; no promete precedencia temporal entre solicitudes simultáneas.
+- Una inscripción por participante y taller, confirmada o en espera.
+- Solo se admite espera si no hay plazas; se conserva el cierre un minuto antes del inicio.
+- Rechazos no modifican inscripciones. Las solicitudes concurrentes comparten una
+  escritura real del taller dentro de una transacción MongoDB con reintentos.
+- No se permite reducir cupos por debajo de confirmadas ni de la capacidad
+  necesaria para conservar la espera. Esta entrega no promueve automáticamente.
+
+API: `POST /api/participantes/espera/` con `codigo_taller`, identidad desde la sesión;
+`GET /api/gestion/talleres/<codigo>/espera/` exclusivo del instructor propietario.
+El catálogo devuelve `mi_estado`, `posicion_espera`, `limite_espera` y `lugares_espera`.
+
+Pruebas: `python -m pytest -q`, `npm test` desde frontend, y
+`python scripts/verificar_atlas.py` para verificación real en una base temporal.
+En entornos Windows restringidos, Vite admite `--configLoader runner`.
+
+Por la restricción de no crear archivos, no se añadió una migración para el cambio
+exclusivamente declarativo de choices de `Inscripcion.estado`. MongoDB conserva
+el mismo campo y colección; `makemigrations --check` señalará ese cambio pendiente.
+No se alteraron migraciones históricas. Antes de exigir sincronía de migraciones
+se debe permitir generar la migración correspondiente.

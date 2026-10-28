@@ -25,3 +25,10 @@ export function inscribirEnTaller(codigoTaller) {
     method: 'POST', datos: { codigo_taller: codigoTaller },
   });
 }
+
+
+export function solicitarEspera(codigoTaller) {
+  return solicitudApi('/api/participantes/espera/', {
+    method: 'POST', datos: { codigo_taller: codigoTaller },
+  });
+}

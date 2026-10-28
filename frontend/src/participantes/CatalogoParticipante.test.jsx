@@ -2,11 +2,12 @@ import React from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import CatalogoParticipante from './CatalogoParticipante.jsx';
-import { inscribirEnTaller } from './api.js';
+import { inscribirEnTaller, solicitarEspera } from './api.js';
 
 vi.mock('./api.js', () => ({
   obtenerCatalogo: vi.fn(),
   inscribirEnTaller: vi.fn(),
+  solicitarEspera: vi.fn(),
 }));
 
 function catalogo(disponibles) {
@@ -72,4 +73,36 @@ test('muestra un error comprensible enviado por el backend', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Inscribirme' }));
   expect((await screen.findByRole('alert')).textContent).toContain('El taller no tiene cupos disponibles.');
   await waitFor(() => expect(cargarCatalogo).toHaveBeenCalledTimes(2));
+});
+
+
+test('solicita espera y recupera su posición del catálogo actualizado', async () => {
+  const inicial = catalogo(0);
+  Object.assign(inicial.talleres[0], { lugares_espera: 1, limite_espera: 2 });
+  const actualizado = catalogo(0);
+  Object.assign(actualizado.talleres[0], { mi_estado: 'en_espera', posicion_espera: 2 });
+  const cargarCatalogo = vi.fn().mockResolvedValueOnce(inicial).mockResolvedValue(actualizado);
+  solicitarEspera.mockResolvedValue({ mensaje: 'Solicitud admitida en la lista de espera.' });
+  render(<CatalogoParticipante cargarCatalogo={cargarCatalogo} usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Entrar en lista de espera' }));
+  await screen.findByRole('button', { name: 'En espera · Posición 2' });
+  expect(solicitarEspera).toHaveBeenCalledWith('T-001');
+  expect(screen.getByRole('button', { name: 'En espera · Posición 2' }).disabled).toBe(true);
+});
+
+test('una espera llena bloquea el envío', async () => {
+  render(<CatalogoParticipante cargarCatalogo={vi.fn().mockResolvedValue(catalogo(0))} usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  expect((await screen.findByRole('button', { name: 'Lista de espera llena' })).disabled).toBe(true);
+});
+
+
+test('si otra solicitud llena la espera muestra el rechazo y actualiza la tarjeta', async () => {
+  const inicial = catalogo(0);
+  inicial.talleres[0].lugares_espera = 1;
+  const cargarCatalogo = vi.fn().mockResolvedValueOnce(inicial).mockResolvedValue(catalogo(0));
+  solicitarEspera.mockRejectedValue(Object.assign(new Error('La lista de espera está llena.'), { status: 409 }));
+  render(<CatalogoParticipante cargarCatalogo={cargarCatalogo} usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Entrar en lista de espera' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('La lista de espera está llena.');
+  expect((await screen.findByRole('button', { name: 'Lista de espera llena' })).disabled).toBe(true);
 });

@@ -102,3 +102,9 @@ def test_codigos_de_taller_se_generan_secuencialmente_desde_el_contador():
     assert len(set(codigos)) == 3
     assert manager.filter.call_args_list == [call(nombre="talleres")] * 3
     assert manager.filter.return_value.update.call_count == 3
+
+
+def test_espera_reutiliza_campos_y_estados_sin_nuevas_referencias():
+    assert Inscripcion.Estado.EN_ESPERA == "en_espera"
+    assert "en_espera" in dict(Inscripcion._meta.get_field("estado").choices)
+    assert Inscripcion._meta.get_field("fecha_solicitud").auto_now_add

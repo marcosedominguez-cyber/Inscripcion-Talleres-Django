@@ -105,6 +105,7 @@ class GestionInstructorTests(SimpleTestCase):
         manager = Mock()
         manager.filter.return_value.first.return_value = taller
         inscripciones = Mock()
+        inscripciones.filter.return_value.order_by.return_value = []
         inscripciones.filter.return_value.values_list.return_value = ["inscripcion-1"]
         request = self.solicitud("patch", "/api/gestion/talleres/T-OWN/", {"nombre": "Nuevo"})
         with patch.object(Taller, "objects", manager), \
@@ -129,6 +130,7 @@ class GestionInstructorTests(SimpleTestCase):
         manager = Mock()
         manager.filter.return_value.first.return_value = taller
         inscripciones = Mock()
+        inscripciones.filter.return_value.order_by.return_value = []
         inscripciones.filter.return_value.values_list.return_value = [
             "i-1", "i-2", "i-3", "i-4", "i-5",
         ]
@@ -251,7 +253,7 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         with patch.object(Taller, "objects", manager), \
              patch("talleres.consultas.cupos_disponibles", side_effect=[2, 0]):
             resultado = listar_talleres_proximos()
-        self.assertEqual(resultado, [aprobado])
+        self.assertEqual([t.codigo for t in resultado], ["T-OK", "T-FULL"])
         filtros = manager.filter.call_args.kwargs
         self.assertEqual(filtros["estado_aprobacion"], Taller.Aprobacion.APROBADO)
         self.assertIn("fecha_inicio__gt", filtros)
@@ -298,7 +300,8 @@ class AprobacionYCatalogoTests(SimpleTestCase):
             fecha_inicio="2030-10-15T10:00Z", fecha_fin="2030-10-15T12:00Z",
         )
         with patch("talleres.api_participantes.listar_talleres_proximos", return_value=[taller]), \
-             patch("talleres.api_participantes.cupos_disponibles", return_value=1):
+             patch("talleres.api_participantes.cupos_disponibles", return_value=1), \
+             patch("talleres.api_participantes.resumen_espera", return_value={}):
             response = catalogo_talleres_api(participante)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content)["talleres"][0]["codigo"], "T-OK")
@@ -336,3 +339,31 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         pendientes.update.assert_called_once_with(
             estado_aprobacion=Taller.Aprobacion.RECHAZADO
         )
+
+
+class ConsultaGestionEsperaTests(SimpleTestCase):
+    setUp = GestionInstructorTests.setUp
+    solicitud = GestionInstructorTests.solicitud
+
+    def test_espera_no_expone_taller_ajeno(self):
+        with patch.object(api_gestion, "buscar_taller_instructor", return_value=None) as buscar:
+            response = api_gestion.espera_instructor(self.solicitud("get", "/"), "AJENO")
+        self.assertEqual(response.status_code, 404)
+        buscar.assert_called_once_with(self.instructor, "AJENO")
+
+    def test_lista_autorizada_con_posiciones(self):
+        solicitud = SimpleNamespace(participante_id="p", fecha_solicitud="2030-01-01T00:00:00Z")
+        with patch.object(api_gestion, "buscar_taller_instructor", return_value="t"), \
+             patch("talleres.consultas.consultar_espera", return_value=[solicitud]), \
+             patch.object(Usuario, "objects") as personas:
+            personas.filter.return_value = [SimpleNamespace(pk="p", nombre="Ana")]
+            response = api_gestion.espera_instructor(self.solicitud("get", "/"), "T-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)["solicitudes"][0]["nombre"], "Ana")
+
+    def test_consulta_espera_exige_sesion_y_rol_instructor(self):
+        for user, esperado in [(AnonymousUser(), 401),
+            (SimpleNamespace(is_authenticated=True, is_active=True,
+                perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE)), 403)]:
+            response = api_gestion.espera_instructor(self.solicitud("get", "/", user=user), "T-1")
+            self.assertEqual(response.status_code, esperado)

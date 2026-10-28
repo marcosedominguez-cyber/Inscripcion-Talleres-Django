@@ -11,12 +11,12 @@ from django.views.decorators.http import require_POST, require_safe
 from pymongo.errors import PyMongoError
 
 from talleres.api_comun import perfil_autorizado
-from talleres.consultas import cupos_disponibles, listar_talleres_proximos
+from talleres.consultas import cupos_disponibles, listar_talleres_proximos, resumen_espera
 from talleres.models import Usuario
 from talleres.servicios import (
     CupoAgotadoError, InscripcionDuplicadaError, ParticipanteNoEncontradoError,
     PlazoInscripcionVencidoError, TallerNoAprobadoError, TallerNoEncontradoError,
-    inscribir_participante,
+    inscribir_participante, solicitar_espera, ListaEsperaLlenaError, TallerConCuposError,
 )
 
 
@@ -36,7 +36,7 @@ def _participante(request, mensaje_rol):
 @require_safe
 @never_cache
 def catalogo_talleres_api(request):
-    _, error = _participante(
+    perfil, error = _participante(
         request, "Esta sección es exclusiva para participantes."
     )
     if error:
@@ -52,6 +52,7 @@ def catalogo_talleres_api(request):
                 "cupos_disponibles": cupos_disponibles(taller),
                 "fecha_inicio": taller.fecha_inicio,
                 "fecha_fin": taller.fecha_fin,
+                **resumen_espera(taller, perfil),
             }
             for taller in listar_talleres_proximos()
         ]
@@ -71,7 +72,7 @@ def catalogo_talleres_api(request):
 
 @require_POST
 @never_cache
-def inscripcion_participante_api(request):
+def inscripcion_participante_api(request, *, espera=False):
     """Inscribe al participante autenticado; la identidad nunca viene del cliente."""
     perfil, error = _participante(
         request, "Esta operación es exclusiva para participantes."
@@ -92,14 +93,14 @@ def inscripcion_participante_api(request):
     if not isinstance(codigo, str) or not codigo.strip() or len(codigo.strip()) > 32:
         return JsonResponse({"detail": "El código del taller no es válido."}, status=400)
     try:
-        inscripcion = inscribir_participante(perfil.ci, codigo.strip())
+        inscripcion = (solicitar_espera if espera else inscribir_participante)(perfil.ci, codigo.strip())
     except ParticipanteNoEncontradoError:
         return JsonResponse({"detail": "El perfil no corresponde a un participante válido."}, status=403)
     except TallerNoEncontradoError:
         return JsonResponse({"detail": "No se encontró el taller solicitado."}, status=404)
     except InscripcionDuplicadaError as error:
         return JsonResponse({"detail": str(error)}, status=409)
-    except CupoAgotadoError as error:
+    except (CupoAgotadoError, ListaEsperaLlenaError, TallerConCuposError) as error:
         return JsonResponse({"detail": str(error)}, status=409)
     except TallerNoAprobadoError as error:
         return JsonResponse({"detail": str(error)}, status=409)
@@ -109,6 +110,13 @@ def inscripcion_participante_api(request):
         return JsonResponse({"detail": "No se pudo completar la inscripción."}, status=503)
 
     return JsonResponse({
-        "mensaje": "Te inscribiste correctamente.",
-        "inscripcion": {"id": str(inscripcion.pk), "estado": inscripcion.estado},
+        "mensaje": "Solicitud admitida en la lista de espera." if espera else "Te inscribiste correctamente.",
+        "inscripcion": {"id": str(inscripcion.pk), "estado": inscripcion.estado,
+                        "posicion_espera": getattr(inscripcion, "posicion_espera", None)},
     }, status=201)
+
+
+@require_POST
+@never_cache
+def espera_participante_api(request):
+    return inscripcion_participante_api(request, espera=True)
