@@ -8,7 +8,7 @@ from contextlib import nullcontext
 
 from django.contrib.auth.models import AnonymousUser
 from django.middleware.csrf import CsrfViewMiddleware
-from django.db import IntegrityError
+from django.db import DatabaseError, IntegrityError
 from django.test import RequestFactory, SimpleTestCase
 
 from talleres.servicios import (
@@ -246,3 +246,153 @@ class ApiEsperaTests(SimpleTestCase):
                    side_effect=servicios.ListaEsperaLlenaError("Llena")):
             self.assertEqual(espera_participante_api(self.solicitar(user,
                 {"codigo_taller": "T-1"})).status_code, 409)
+
+
+class ApiMisInscripcionesTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.participante = SimpleNamespace(
+            is_authenticated=True,
+            is_active=True,
+            perfil=SimpleNamespace(
+                rol=Usuario.Rol.PARTICIPANTE, ci="12345678",
+                cancelaciones_consecutivas=0,
+            ),
+        )
+        self.cancelaciones = patch(
+            "talleres.api_participantes.listar_cancelaciones_participante",
+            return_value=[],
+        )
+        self.cancelaciones.start()
+        self.addCleanup(self.cancelaciones.stop)
+
+    def solicitar(self, user=None):
+        request = self.factory.get("/api/participantes/inscripciones/")
+        request.user = user if user is not None else AnonymousUser()
+        return request
+
+    def inscripcion(self, *, codigo, estado, taller_id=None, inicio=None, instructor=True):
+        taller = SimpleNamespace(
+            codigo=codigo,
+            nombre=f"Taller {codigo}",
+            descripcion="",
+            cupos=10,
+            fecha_inicio=inicio or datetime(2030, 10, 15, 10, 0, tzinfo=dt_timezone.utc),
+            fecha_fin=datetime(2030, 10, 15, 12, 0, tzinfo=dt_timezone.utc),
+            instructor_id="instructor-1" if instructor else None,
+            instructor=SimpleNamespace(nombre="Ana Pérez") if instructor else None,
+        )
+        return SimpleNamespace(
+            taller_id=taller_id or codigo,
+            taller=taller,
+            estado=estado,
+            fecha_solicitud=datetime(2030, 10, 1, 12, 0, tzinfo=dt_timezone.utc),
+        )
+
+    def test_requiere_sesion_y_rol_participante(self):
+        self.assertEqual(inscripcion_participante_api(self.solicitar()).status_code, 401)
+        instructor = SimpleNamespace(
+            is_authenticated=True,
+            is_active=True,
+            perfil=SimpleNamespace(rol=Usuario.Rol.INSTRUCTOR, ci="12345678"),
+        )
+        self.assertEqual(
+            inscripcion_participante_api(self.solicitar(instructor)).status_code,
+            403,
+        )
+
+    def test_lista_estados_sin_posiciones_y_con_datos_del_taller(self):
+        confirmada = self.inscripcion(
+            codigo="T-001", estado=Inscripcion.Estado.CONFIRMADA,
+        )
+        en_espera = self.inscripcion(
+            codigo="T-002", estado=Inscripcion.Estado.EN_ESPERA,
+            inicio=datetime(2030, 10, 20, 10, 0, tzinfo=dt_timezone.utc),
+        )
+        with patch(
+            "talleres.api_participantes.listar_inscripciones_participante",
+            return_value=[en_espera, confirmada],
+        ) as consulta:
+            response = inscripcion_participante_api(self.solicitar(self.participante))
+
+        self.assertEqual(response.status_code, 200)
+        datos = json.loads(response.content)
+        self.assertEqual(set(datos), {
+            "inscripciones", "cancelaciones", "cancelaciones_consecutivas",
+            "limite_cancelaciones", "inscripciones_bloqueadas", "zona_horaria",
+        })
+        self.assertEqual(datos["zona_horaria"], "America/La_Paz")
+        self.assertEqual(datos["cancelaciones"], [])
+        self.assertFalse(datos["inscripciones_bloqueadas"])
+        self.assertEqual(
+            [item["estado"] for item in datos["inscripciones"]],
+            [Inscripcion.Estado.CONFIRMADA, Inscripcion.Estado.EN_ESPERA],
+        )
+        self.assertEqual(datos["inscripciones"][0]["instructor"], "Ana Pérez")
+        self.assertEqual(datos["inscripciones"][0]["cupos"], 10)
+        self.assertIn("fecha_solicitud", datos["inscripciones"][0])
+        self.assertNotIn("posicion_espera", datos["inscripciones"][0])
+        consulta.assert_called_once_with(self.participante.perfil)
+
+    def test_promocion_no_duplica_el_taller_y_prioriza_confirmada(self):
+        en_espera = self.inscripcion(
+            codigo="T-001", estado=Inscripcion.Estado.EN_ESPERA, taller_id="taller-1",
+        )
+        confirmada = self.inscripcion(
+            codigo="T-001", estado=Inscripcion.Estado.CONFIRMADA, taller_id="taller-1",
+        )
+        with patch(
+            "talleres.api_participantes.listar_inscripciones_participante",
+            return_value=[en_espera, confirmada],
+        ):
+            response = inscripcion_participante_api(self.solicitar(self.participante))
+
+        datos = json.loads(response.content)
+        self.assertEqual(len(datos["inscripciones"]), 1)
+        self.assertEqual(datos["inscripciones"][0]["estado"], Inscripcion.Estado.CONFIRMADA)
+
+    def test_lista_vacia_y_error_de_consulta(self):
+        with patch(
+            "talleres.api_participantes.listar_inscripciones_participante",
+            return_value=[],
+        ):
+            response = inscripcion_participante_api(self.solicitar(self.participante))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)["inscripciones"], [])
+
+        with patch(
+            "talleres.api_participantes.listar_inscripciones_participante",
+            side_effect=DatabaseError("fallo"),
+        ):
+            response = inscripcion_participante_api(self.solicitar(self.participante))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            json.loads(response.content)["detail"],
+            "No se pudieron consultar tus inscripciones.",
+        )
+
+    def test_endpoint_omite_talleres_finalizados_en_ambos_estados(self):
+        ahora = datetime(2030, 10, 15, 12, 0, tzinfo=dt_timezone.utc)
+        finalizada_confirmada = self.inscripcion(
+            codigo="T-001", estado=Inscripcion.Estado.CONFIRMADA,
+        )
+        finalizada_confirmada.taller.fecha_fin = ahora - timedelta(seconds=1)
+        finalizada_en_espera = self.inscripcion(
+            codigo="T-002", estado=Inscripcion.Estado.EN_ESPERA,
+        )
+        finalizada_en_espera.taller.fecha_fin = ahora
+        futura = self.inscripcion(
+            codigo="T-003", estado=Inscripcion.Estado.CONFIRMADA,
+        )
+        futura.taller.fecha_fin = ahora + timedelta(seconds=1)
+        manager = Mock()
+        manager.filter.return_value.select_related.return_value = [
+            finalizada_confirmada, finalizada_en_espera, futura,
+        ]
+        with patch("talleres.consultas.Inscripcion.objects", manager), patch(
+            "talleres.consultas.timezone.now", return_value=ahora
+        ):
+            response = inscripcion_participante_api(self.solicitar(self.participante))
+
+        datos = json.loads(response.content)
+        self.assertEqual([item["codigo"] for item in datos["inscripciones"]], ["T-003"])

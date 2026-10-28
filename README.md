@@ -7,18 +7,20 @@ Aplicación para publicar talleres con cupos limitados, revisar propuestas de in
 - Registro de cuentas de participante o instructor con nombre de usuario, CI numérica y contraseña; inicio de sesión con CI y contraseña; y cierre de sesión con sesión Django.
 - El registro público no permite asignar rol administrador ni privilegios de `staff`.
 - Catálogo web de talleres aprobados, futuros y con plazas disponibles, visible a participantes autenticados.
-- Inscripción del participante autenticado. El servidor comprueba rol, taller aprobado, fecha límite (un minuto antes del inicio), duplicados y plazas disponibles. La capacidad se controla dentro de una transacción con bloqueo lógico del taller.
+- Inscripción del participante autenticado. El servidor comprueba rol, taller aprobado, fecha límite (un minuto antes del inicio), duplicados, bloqueo de la cuenta y plazas disponibles. La capacidad se controla dentro de una transacción con bloqueo lógico del taller.
+- Cancelación de inscripciones confirmadas o en espera antes del inicio. La plaza liberada se asigna a la primera persona de la lista de espera; el antecedente queda en un historial inmutable con el taller, el estado anterior y la fecha.
+- Bloqueo para nuevas inscripciones al acumular tres cancelaciones consecutivas. El contador no se reinicia automáticamente al volver a inscribirse; un administrador puede rehabilitar la cuenta desde Django Admin.
 - Reglas de taller: cupo entre 4 y 40 personas y duración entre 24 horas y 7 días; las fechas se almacenan en UTC y se interpretan/muestran en `America/La_Paz`.
 - Panel de instructor para proponer talleres, ver sus propuestas y plazas, y editar una propuesta propia. Al editar, vuelve a estado pendiente de aprobación.
 - Django Admin (`/admin/`) para personal autorizado con rol administrador. Permite consultar registros y usar acciones para aprobar o rechazar talleres pendientes.
 - En la aplicación de terminal hay registro de participantes y talleres, listado de ambos, consulta de inscripciones y alta de inscripción. Las inscripciones del menú también requieren taller aprobado.
-- Persistencia MongoDB mediante el backend Django para MongoDB. Los datos de negocio usan las colecciones `participantes`, `talleres`, `inscripciones` y `contadores`; este último mantiene la secuencia de códigos de talleres.
+- Persistencia MongoDB mediante el backend Django para MongoDB. Los datos de negocio usan las colecciones `participantes`, `talleres`, `inscripciones`, `cancelaciones` y `contadores`; este último mantiene la secuencia de códigos de talleres.
 
 ### No implementado en el estado inspeccionado
 
-- Lista de espera, cancelación de inscripción, promoción automática de participantes y notificaciones.
+- Notificaciones a las personas promovidas desde la lista de espera.
 - Restricciones de superposición de horarios entre talleres.
-- Historial web de inscripciones del participante.
+- Penalizaciones por cancelaciones tardías o inasistencias.
 
 ## Arquitectura y tecnologías
 
@@ -189,18 +191,26 @@ El instructor consulta la lista ordenada únicamente de sus propios talleres.
 - Rechazos no modifican inscripciones. Las solicitudes concurrentes comparten una
   escritura real del taller dentro de una transacción MongoDB con reintentos.
 - No se permite reducir cupos por debajo de confirmadas ni de la capacidad
-  necesaria para conservar la espera. Esta entrega no promueve automáticamente.
+  necesaria para conservar la espera. La promoción se ejecuta dentro de la
+  cancelación de una inscripción confirmada; no hay un proceso periódico aparte.
 
 API: `POST /api/participantes/espera/` con `codigo_taller`, identidad desde la sesión;
 `GET /api/gestion/talleres/<codigo>/espera/` exclusivo del instructor propietario.
 El catálogo devuelve `mi_estado`, `posicion_espera`, `limite_espera` y `lugares_espera`.
 
+### Cancelaciones, historial y bloqueo
+
+- Una inscripción activa (confirmada o en espera) puede cancelarse mientras el taller no haya comenzado.
+- La cancelación elimina la inscripción activa y conserva un registro en la colección `cancelaciones` con `codigo_taller`, `nombre_taller`, `estado_anterior` y `fecha_cancelacion`. La re-inscripción posterior crea una solicitud nueva y no borra el antecedente.
+- Si se cancela una inscripción confirmada, la primera persona en espera pasa a confirmada respetando `fecha_solicitud` e `id`; no se crea otro registro ni se altera el cupo total.
+- Cada cancelación incrementa `Usuario.cancelaciones_consecutivas`. Al llegar a tres, la cuenta no puede crear nuevas inscripciones ni solicitudes de espera. El contador solo se reinicia mediante la acción administrativa «Rehabilitar inscripciones».
+- API: `POST /api/participantes/inscripciones/cancelar/` con `codigo_taller` e identidad desde la sesión. `GET /api/participantes/inscripciones/` devuelve también `cancelaciones`, `cancelaciones_consecutivas`, `limite_cancelaciones` e `inscripciones_bloqueadas`.
+- La migración `0007_usuario_cancelaciones_consecutivas_cancelacion.py` agrega el contador y la colección de historial. Los documentos de participantes anteriores al cambio se interpretan con contador cero.
+
 Pruebas: `python -m pytest -q`, `npm test` desde frontend, y
 `python scripts/verificar_atlas.py` para verificación real en una base temporal.
+Las pruebas de cancelación, historial y bloqueo están en `tests/test_cancelaciones.py`.
 En entornos Windows restringidos, Vite admite `--configLoader runner`.
 
-Por la restricción de no crear archivos, no se añadió una migración para el cambio
-exclusivamente declarativo de choices de `Inscripcion.estado`. MongoDB conserva
-el mismo campo y colección; `makemigrations --check` señalará ese cambio pendiente.
-No se alteraron migraciones históricas. Antes de exigir sincronía de migraciones
-se debe permitir generar la migración correspondiente.
+La migración `0007` agrega el contador y la colección de historial sin alterar
+migraciones históricas. `makemigrations --check` no detecta cambios pendientes.

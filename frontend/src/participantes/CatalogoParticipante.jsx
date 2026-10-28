@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { inscribirEnTaller, obtenerCatalogo, solicitarEspera } from './api.js';
+import {
+  cancelarInscripcion, inscribirEnTaller, obtenerCatalogo, obtenerMisInscripciones,
+  solicitarEspera,
+} from './api.js';
 import './catalogo.css';
 
 function FechaTaller({ valor, zona }) {
@@ -13,7 +16,11 @@ function FechaTaller({ valor, zona }) {
   return <time dateTime={valor}>{dia} <span>· {hora}</span></time>;
 }
 
-function TarjetaTaller({ taller, zona, onInscribirme, enviando }) {
+function TarjetaTaller({
+  taller, zona, onInscribirme, enviando, modo = 'catalogo', onCancelar, cancelando = false,
+}) {
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const esMisInscripciones = modo === 'inscripciones';
   const espera = taller.cupos_disponibles === 0;
   const inscrito = Boolean(taller.mi_estado);
   const llena = espera && !(taller.lugares_espera > 0);
@@ -22,38 +29,97 @@ function TarjetaTaller({ taller, zona, onInscribirme, enviando }) {
     : inscrito ? 'Inscripción confirmada'
     : llena ? 'Lista de espera llena'
     : espera ? 'Entrar en lista de espera' : 'Inscribirme';
+  const estado = taller.estado === 'en_espera' ? 'En espera' : 'Confirmada';
   return (
-    <article className="pw-card" aria-labelledby={`taller-${taller.codigo}`}>
+    <article
+      className={`pw-card${esMisInscripciones ? ' pw-card-inscripcion' : ''}`}
+      aria-labelledby={`taller-${taller.codigo}`}
+    >
       <div className="pw-card-top">
         <span className="pw-code">{taller.codigo}</span>
-        <span className="pw-tag">Próximamente</span>
+        <div className="pw-card-top-actions">
+          <span className={esMisInscripciones
+            ? `pw-tag ${taller.estado === 'en_espera' ? 'pw-tag-espera' : 'pw-tag-confirmada'}`
+            : 'pw-tag'}
+          >
+            {esMisInscripciones ? estado : 'Próximamente'}
+          </span>
+          {esMisInscripciones && onCancelar && (
+            <div className="pw-menu-wrap">
+              <button
+                className="pw-menu-toggle"
+                type="button"
+                aria-label={`Acciones para ${taller.nombre}`}
+                aria-haspopup="menu"
+                aria-expanded={menuAbierto}
+                onClick={() => setMenuAbierto((abierto) => !abierto)}
+                disabled={cancelando}
+              >
+                ⋯
+              </button>
+              {menuAbierto && (
+                <div className="pw-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuAbierto(false);
+                      onCancelar(taller);
+                    }}
+                  >
+                    Cancelar inscripción
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <h3 id={`taller-${taller.codigo}`}>{taller.nombre}</h3>
       {taller.descripcion && <p className="pw-description">{taller.descripcion}</p>}
       <dl className="pw-details">
         <div><dt>Inicio</dt><dd><FechaTaller valor={taller.fecha_inicio} zona={zona} /></dd></div>
         <div><dt>Fin</dt><dd><FechaTaller valor={taller.fecha_fin} zona={zona} /></dd></div>
+        {esMisInscripciones && taller.instructor && (
+          <div><dt>Instructor</dt><dd>{taller.instructor}</dd></div>
+        )}
+        {esMisInscripciones && taller.fecha_solicitud && (
+          <div><dt>Solicitud</dt><dd><FechaTaller valor={taller.fecha_solicitud} zona={zona} /></dd></div>
+        )}
       </dl>
       <div className="pw-capacity">
         <span>Cupo máximo</span>
         <strong>{taller.cupos} {taller.cupos === 1 ? 'persona' : 'personas'}</strong>
-        <span>Disponibles</span>
-        <strong>{taller.cupos_disponibles}</strong>
+        {!esMisInscripciones && (
+          <>
+            <span>Disponibles</span>
+            <strong>{taller.cupos_disponibles}</strong>
+          </>
+        )}
       </div>
-      <button className="pw-action" type="button" onClick={() => onInscribirme(taller.codigo, espera)} disabled={enviando || inscrito || llena}>
-        {enviando ? 'Procesando…' : etiqueta}
-      </button>
+      {!esMisInscripciones && (
+        <button className="pw-action" type="button" onClick={() => onInscribirme(taller.codigo, espera)} disabled={enviando || inscrito || llena}>
+          {enviando ? 'Procesando…' : etiqueta}
+        </button>
+      )}
     </article>
   );
 }
 
 export default function CatalogoParticipante({
-  cargarCatalogo = obtenerCatalogo, usuario, onCerrarSesion, onSesionCaducada, enviando, error,
+  cargarCatalogo = obtenerCatalogo, cargarInscripciones = obtenerMisInscripciones,
+  usuario, onCerrarSesion, onSesionCaducada, enviando, error,
 }) {
+  const [vista, setVista] = useState('catalogo');
   const [estado, setEstado] = useState({ tipo: 'cargando' });
+  const [estadoInscripciones, setEstadoInscripciones] = useState({ tipo: 'inactivo' });
   const [intento, setIntento] = useState(0);
+  const [intentoInscripciones, setIntentoInscripciones] = useState(0);
   const [codigoEnviando, setCodigoEnviando] = useState(null);
   const [mensajeInscripcion, setMensajeInscripcion] = useState(null);
+  const [cancelacionPendiente, setCancelacionPendiente] = useState(null);
+  const [cancelando, setCancelando] = useState(false);
+  const [mensajeCancelacion, setMensajeCancelacion] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -78,8 +144,81 @@ export default function CatalogoParticipante({
     };
   }, [cargarCatalogo, intento, onSesionCaducada]);
 
+  useEffect(() => {
+    if (vista !== 'inscripciones') return undefined;
+    const controller = new AbortController();
+    let vigente = true;
+    setEstadoInscripciones({ tipo: 'cargando' });
+    cargarInscripciones({ signal: controller.signal })
+      .then((datosInscripciones) => {
+        if (vigente) setEstadoInscripciones({ tipo: 'listo', datos: datosInscripciones });
+      })
+      .catch((fallo) => {
+        if (vigente && fallo.name !== 'AbortError') {
+          if (fallo.status === 401) {
+            onSesionCaducada();
+          } else {
+            setEstadoInscripciones({ tipo: fallo.status === 403 ? 'sin-permiso' : 'error' });
+          }
+        }
+      });
+    return () => {
+      vigente = false;
+      controller.abort();
+    };
+  }, [cargarInscripciones, intentoInscripciones, onSesionCaducada, vista]);
+
   const datos = estado.tipo === 'listo' ? estado.datos : null;
+  const datosInscripciones = estadoInscripciones.tipo === 'listo'
+    ? estadoInscripciones.datos : null;
+  const confirmadas = datosInscripciones
+    ? datosInscripciones.inscripciones.filter((inscripcion) => inscripcion.estado === 'confirmada')
+    : [];
+  const enEspera = datosInscripciones
+    ? datosInscripciones.inscripciones.filter((inscripcion) => inscripcion.estado === 'en_espera')
+    : [];
   const nombre = datos?.usuario?.nombre || usuario.nombre_usuario;
+
+  function abrirInscripciones() {
+    if (vista === 'inscripciones') return;
+    setMensajeCancelacion(null);
+    setEstadoInscripciones({ tipo: 'cargando' });
+    setVista('inscripciones');
+  }
+
+  function solicitarCancelacion(taller) {
+    setMensajeCancelacion(null);
+    setCancelacionPendiente(taller);
+  }
+
+  async function confirmarCancelacion() {
+    if (!cancelacionPendiente || cancelando) return;
+    const taller = cancelacionPendiente;
+    setCancelando(true);
+    setMensajeCancelacion(null);
+    try {
+      const resultado = await cancelarInscripcion(taller.codigo);
+      setCancelacionPendiente(null);
+      setMensajeCancelacion({
+        tipo: 'exito',
+        texto: resultado.mensaje || 'Cancelación registrada.',
+      });
+      setIntentoInscripciones((actual) => actual + 1);
+      setIntento((actual) => actual + 1);
+    } catch (fallo) {
+      setCancelacionPendiente(null);
+      if (fallo.status === 401) {
+        onSesionCaducada();
+      } else {
+        setMensajeCancelacion({
+          tipo: 'error',
+          texto: fallo.message || 'No se pudo cancelar la inscripción.',
+        });
+      }
+    } finally {
+      setCancelando(false);
+    }
+  }
 
   async function inscribirme(codigo, espera = false) {
     if (codigoEnviando) return;
@@ -129,12 +268,20 @@ export default function CatalogoParticipante({
       <a className="pw-skip" href="#contenido">Ir al contenido</a>
       <header className="pw-header">
         <div className="pw-header-inner">
-          <a className="pw-brand" href="#titulo-listado" aria-label="Talleres, ir al catálogo">
+          <a className="pw-brand" href="#contenido" aria-label="Talleres, ir al catálogo"
+            onClick={() => setVista('catalogo')}>
             <span className="pw-brand-icon" aria-hidden="true">T</span>
             Talleres<span className="pw-brand-dot">.</span>
           </a>
           <nav className="pw-nav" aria-label="Navegación del participante">
-            <a href="#titulo-listado" aria-current="page">Explorar talleres</a>
+            <button type="button" aria-current={vista === 'catalogo' ? 'page' : undefined}
+              onClick={() => setVista('catalogo')}>
+              Explorar talleres
+            </button>
+            <button type="button" aria-current={vista === 'inscripciones' ? 'page' : undefined}
+              onClick={abrirInscripciones}>
+              Mis inscripciones
+            </button>
           </nav>
           <div className="pw-user">
             <span className="pw-avatar" aria-hidden="true">{nombre.charAt(0).toUpperCase()}</span>
@@ -147,6 +294,8 @@ export default function CatalogoParticipante({
       </header>
       <main id="contenido" className="pw-main">
         {error && <p className="pw-empty" role="alert">{error}</p>}
+        {vista === 'catalogo' ? (
+          <>
         <section className="pw-hero" aria-labelledby="titulo-catalogo">
           <div className="pw-hero-copy">
             <p className="pw-eyebrow"><span aria-hidden="true" /> UN ESPACIO PARA SEGUIR APRENDIENDO</p>
@@ -200,7 +349,92 @@ export default function CatalogoParticipante({
             </div>
           )}
         </section>
+          </>
+        ) : (
+          <section className="pw-mis" aria-labelledby="titulo-mis"
+            aria-busy={estadoInscripciones.tipo === 'cargando'}>
+            <h1 id="titulo-mis">Mis inscripciones</h1>
+            {datosInscripciones && (
+              <p className="pw-mis-zona">Horarios en {datosInscripciones.zona_horaria}</p>
+            )}
+            {mensajeCancelacion && (
+              <p className="pw-empty" role={mensajeCancelacion.tipo === 'exito' ? 'status' : 'alert'}>
+                {mensajeCancelacion.texto}
+              </p>
+            )}
+            {datosInscripciones?.inscripciones_bloqueadas && (
+              <p className="pw-mis-estado" role="alert">
+                Tu cuenta está bloqueada para nuevas inscripciones por acumular{' '}
+                {datosInscripciones.limite_cancelaciones || 3} cancelaciones consecutivas.
+                Contactá a la organización para solicitar la rehabilitación.
+              </p>
+            )}
+            {estadoInscripciones.tipo === 'cargando' && (
+              <div className="pw-mis-estado" role="status">Cargando tus inscripciones…</div>
+            )}
+            {estadoInscripciones.tipo === 'sin-permiso' && (
+              <div className="pw-mis-estado" role="alert">
+                No tenés permiso para consultar tus inscripciones.
+              </div>
+            )}
+            {estadoInscripciones.tipo === 'error' && (
+              <div className="pw-mis-estado" role="alert">
+                <p>No pudimos cargar tus inscripciones.</p>
+                <button className="pw-action" type="button"
+                  onClick={() => setIntentoInscripciones((actual) => actual + 1)}>
+                  Reintentar
+                </button>
+              </div>
+            )}
+            {datosInscripciones && (
+              <div className="pw-mis-columnas">
+                <section className="pw-mis-columna" aria-label="Inscripciones confirmadas">
+                  {confirmadas.map((inscripcion) => (
+                    <TarjetaTaller key={inscripcion.codigo} taller={inscripcion}
+                      zona={datosInscripciones.zona_horaria} modo="inscripciones"
+                      onCancelar={solicitarCancelacion} cancelando={cancelando} />
+                  ))}
+                  {confirmadas.length === 0 && (
+                    <p className="pw-mis-empty" role="status">No tenés inscripciones confirmadas.</p>
+                  )}
+                </section>
+                <section className="pw-mis-columna" aria-label="Lista de espera">
+                  {enEspera.map((inscripcion) => (
+                    <TarjetaTaller key={inscripcion.codigo} taller={inscripcion}
+                      zona={datosInscripciones.zona_horaria} modo="inscripciones"
+                      onCancelar={solicitarCancelacion} cancelando={cancelando} />
+                  ))}
+                  {enEspera.length === 0 && (
+                    <p className="pw-mis-empty" role="status">No tenés solicitudes en espera.</p>
+                  )}
+                </section>
+              </div>
+            )}
+          </section>
+        )}
       </main>
+      {cancelacionPendiente && (
+        <div className="pw-modal-backdrop">
+          <div className="pw-modal" role="dialog" aria-modal="true"
+            aria-labelledby="titulo-cancelacion">
+            <h2 id="titulo-cancelacion">Cancelar inscripción</h2>
+            <p>
+              ¿Querés cancelar tu inscripción en <strong>{cancelacionPendiente.nombre}</strong>?
+              La cancelación no se puede deshacer.
+            </p>
+            <div className="pw-modal-actions">
+              <button className="pw-action pw-action-secondary" type="button"
+                onClick={() => setCancelacionPendiente(null)} disabled={cancelando}>
+                Volver
+              </button>
+              <button className="pw-action" type="button"
+                onClick={confirmarCancelacion} disabled={cancelando}>
+                {cancelando ? 'Cancelando…' : 'Sí, cancelar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <footer className="pw-footer"><span>Talleres · Espacio del participante</span><span>Aprender nos conecta.</span></footer>
     </div>
   );

@@ -23,10 +23,19 @@ class Usuario(models.Model):
         related_name="perfil", null=True, blank=True,
     )
     rol = models.CharField(max_length=20, choices=Rol.choices, default=Rol.PARTICIPANTE)
+    cancelaciones_consecutivas = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "participantes"
         ordering = ["nombre", "id"]
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        usuario = super().from_db(db, field_names, values)
+        # Los documentos anteriores al bloqueo no tienen el contador.
+        if usuario.cancelaciones_consecutivas is None:
+            usuario.cancelaciones_consecutivas = 0
+        return usuario
 
     def clean(self):
         super().clean()
@@ -140,6 +149,30 @@ class Inscripcion(models.Model):
 
     def __str__(self):
         return f"{self.participante_id} -> {self.taller_id} ({self.estado})"
+
+
+class Cancelacion(models.Model):
+    """Antecedente inmutable de una inscripción cancelada."""
+
+    id = ObjectIdAutoField(primary_key=True)
+    participante = models.ForeignKey(
+        Usuario, on_delete=models.PROTECT, related_name="cancelaciones",
+        limit_choices_to={"rol": Usuario.Rol.PARTICIPANTE},
+    )
+    taller = models.ForeignKey(
+        Taller, on_delete=models.PROTECT, related_name="cancelaciones"
+    )
+    codigo_taller = models.CharField(max_length=32)
+    nombre_taller = models.CharField(max_length=200)
+    estado_anterior = models.CharField(max_length=20, choices=Inscripcion.Estado.choices)
+    fecha_cancelacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "cancelaciones"
+        ordering = ["-fecha_cancelacion", "-id"]
+
+    def __str__(self):
+        return f"{self.participante_id} -> {self.codigo_taller} ({self.estado_anterior})"
 
 
 class Contador(models.Model):

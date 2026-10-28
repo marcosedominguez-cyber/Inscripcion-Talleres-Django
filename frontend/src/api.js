@@ -1,8 +1,9 @@
 let csrfToken;
 
-export async function solicitudApi(url, { method = 'GET', datos } = {}) {
+export async function solicitudApi(url, { method = 'GET', datos, signal } = {}) {
   const response = await fetch(url, {
     method,
+    signal,
     credentials: 'same-origin',
     headers: datos === undefined ? {} : {
       'Content-Type': 'application/json',

@@ -7,6 +7,7 @@ CUPO_MAXIMO = 40
 DURACION_MINIMA = timedelta(hours=24)
 DURACION_MAXIMA = timedelta(days=7)
 MARGEN_CIERRE_INSCRIPCION = timedelta(seconds=60)
+LIMITE_CANCELACIONES_CONSECUTIVAS = 3
 
 
 def error_duracion(fecha_inicio, fecha_fin):
@@ -33,3 +34,13 @@ def inscripcion_abierta(fecha_inicio, ahora):
 def limite_espera(cupos):
     """Máximo entero que no supera el veinte por ciento."""
     return cupos // 5
+
+
+def cuenta_bloqueada_para_inscripciones(cancelaciones_consecutivas):
+    """El bloqueo se deriva del contador para no guardar estados contradictorios."""
+    return (cancelaciones_consecutivas or 0) >= LIMITE_CANCELACIONES_CONSECUTIVAS
+
+
+def cancelacion_abierta(fecha_inicio, ahora):
+    """La cancelación se permite mientras el taller no haya comenzado."""
+    return ahora < fecha_inicio
