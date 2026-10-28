@@ -17,7 +17,9 @@ from django.utils import timezone
 from pymongo.errors import PyMongoError
 from proyecto.reglas_inscripciones import InscripcionError
 from proyecto.reglas_usuarios import DatosParticipanteInvalidosError
+from talleres.consultas import listar_cancelaciones_participante
 from talleres.models import Usuario, Taller, Inscripcion
+from talleres.reglas import LIMITE_CANCELACIONES_CONSECUTIVAS
 from talleres.servicios import ErrorNegocioTalleres
 from talleres import servicios
 
@@ -37,7 +39,9 @@ def mostrar_menu():
     print("4. Inscribir participante a un taller")
     print("5. Ver inscripciones realizadas")
     print("6. Listar participantes registrados")
-    print("7. Salir")
+    print("7. Cancelar una inscripción")
+    print("8. Ver historial de cancelaciones")
+    print("9. Salir")
     print("========================================")
 
 
@@ -46,7 +50,7 @@ def ejecutar():
     try:
         while True:
             mostrar_menu()
-            opcion = input("Selecciona una opción (1-7): ").strip()
+            opcion = input("Selecciona una opción (1-9): ").strip()
             try:
                 if opcion == "1":
                     ci = input("CI del participante: ").strip()
@@ -90,6 +94,50 @@ def ejecutar():
                     for participante in participantes:
                         print(f"[{participante.ci}] {participante.nombre}")
                 elif opcion == "7":
+                    ci = input("CI del participante: ").strip()
+                    codigo = input("ID del taller (ej. T-001): ").strip()
+                    cancelacion = servicios.cancelar_inscripcion(ci, codigo)
+                    print(
+                        f"Cancelación registrada: {cancelacion.nombre_taller} "
+                        f"({cancelacion.codigo_taller}), estado anterior "
+                        f"{cancelacion.estado_anterior}."
+                    )
+                    if cancelacion.promovido:
+                        print("Se promovió a la primera persona en lista de espera.")
+                    if cancelacion.cuenta_bloqueada:
+                        print(
+                            "La cuenta quedó bloqueada para nuevas inscripciones "
+                            f"por acumular {LIMITE_CANCELACIONES_CONSECUTIVAS} "
+                            "cancelaciones consecutivas."
+                        )
+                elif opcion == "8":
+                    ci = input("CI del participante: ").strip()
+                    try:
+                        participante = Usuario.objects.get(
+                            ci=ci, rol=Usuario.Rol.PARTICIPANTE
+                        )
+                    except Usuario.DoesNotExist:
+                        print(f"No existe un participante con la CI {ci}.")
+                        continue
+                    historial = listar_cancelaciones_participante(participante)
+                    if not historial:
+                        print("El participante no tiene cancelaciones registradas.")
+                    for numero, cancelacion in enumerate(historial, start=1):
+                        fecha = timezone.localtime(cancelacion.fecha_cancelacion)
+                        print(
+                            f"{numero}. [{cancelacion.codigo_taller}] "
+                            f"{cancelacion.nombre_taller} | "
+                            f"Estado anterior: {cancelacion.estado_anterior} | "
+                            f"Cancelada: {fecha:%Y-%m-%d %H:%M}"
+                        )
+                    total = getattr(
+                        participante, "cancelaciones_consecutivas", 0
+                    ) or 0
+                    print(
+                        f"Cancelaciones consecutivas: {total}. "
+                        f"Límite: {LIMITE_CANCELACIONES_CONSECUTIVAS}."
+                    )
+                elif opcion == "9":
                     print("¡Hasta luego! Los datos permanecen guardados.")
                     break
                 else:

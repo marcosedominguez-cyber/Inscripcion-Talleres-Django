@@ -2,7 +2,7 @@ from django.contrib import admin, messages
 from django.db.models import Q
 
 from talleres.admin_site import admin_site
-from talleres.models import Inscripcion, Taller, Usuario
+from talleres.models import Cancelacion, Inscripcion, Taller, Usuario
 
 
 class AdminSistemaModelAdmin(admin.ModelAdmin):
@@ -29,10 +29,19 @@ class AdminSistemaModelAdmin(admin.ModelAdmin):
 
 @admin.register(Usuario, site=admin_site)
 class UsuarioAdmin(AdminSistemaModelAdmin):
-    list_display = ("nombre", "ci", "rol", "cuenta")
+    list_display = ("nombre", "ci", "rol", "cuenta", "cancelaciones_consecutivas")
     list_filter = ("rol",)
     search_fields = ("nombre", "ci", "cuenta__username")
     list_select_related = ("cuenta",)
+    actions = ("rehabilitar_inscripciones",)
+
+    @admin.action(description="Rehabilitar inscripciones (reiniciar cancelaciones)")
+    def rehabilitar_inscripciones(self, request, queryset):
+        actualizados = queryset.update(cancelaciones_consecutivas=0)
+        self.message_user(
+            request, f"{actualizados} cuenta(s) habilitadas para inscribirse.",
+            messages.SUCCESS,
+        )
 
 
 class AprobacionFilter(admin.SimpleListFilter):
@@ -87,3 +96,29 @@ class InscripcionAdmin(AdminSistemaModelAdmin):
     list_filter = ("estado",)
     search_fields = ("participante__nombre", "participante__ci", "taller__codigo", "taller__nombre")
     list_select_related = ("participante", "taller")
+
+
+@admin.register(Cancelacion, site=admin_site)
+class CancelacionAdmin(AdminSistemaModelAdmin):
+    list_display = (
+        "participante", "codigo_taller", "nombre_taller", "estado_anterior",
+        "fecha_cancelacion",
+    )
+    list_filter = ("estado_anterior",)
+    search_fields = (
+        "participante__nombre", "participante__ci", "codigo_taller", "nombre_taller",
+    )
+    list_select_related = ("participante",)
+    readonly_fields = (
+        "participante", "taller", "codigo_taller", "nombre_taller",
+        "estado_anterior", "fecha_cancelacion",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

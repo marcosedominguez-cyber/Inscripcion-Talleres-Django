@@ -5,6 +5,7 @@ from talleres import api_gestion, api_participantes
 participantes_urlpatterns = [
     path("espera/", api_participantes.espera_participante_api, name="espera"),
     path("talleres/", api_participantes.catalogo_talleres_api, name="catalogo"),
+    path("inscripciones/cancelar/", api_participantes.cancelar_inscripcion_api, name="cancelar"),
     path("inscripciones/", api_participantes.inscripcion_participante_api, name="inscripcion"),
 ]
 
