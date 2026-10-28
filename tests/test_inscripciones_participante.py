@@ -69,10 +69,13 @@ class ServicioInscripcionTests(SimpleTestCase):
         self.assertEqual(talleres.filter.call_count, 2)
         inscripciones.create.assert_called_once_with(participante=participante, taller=taller)
 
-    def test_rechaza_inscripcion_en_el_limite_exacto_de_un_minuto(self):
+    def test_acepta_inscripcion_en_el_limite_exacto_de_un_minuto(self):
         inicio = self.ahora + timedelta(minutes=5)
-        with self.assertRaises(PlazoInscripcionVencidoError):
-            self.ejecutar(inicio=inicio, ahora=inicio - timedelta(minutes=1))
+        resultado, participante, taller, _, inscripciones, _ = self.ejecutar(
+            inicio=inicio, ahora=inicio - timedelta(minutes=1),
+        )
+        self.assertEqual(resultado.pk, "inscripcion-id")
+        inscripciones.create.assert_called_once_with(participante=participante, taller=taller)
 
     def test_rechaza_taller_no_aprobado(self):
         for estado in (Taller.Aprobacion.PENDIENTE, Taller.Aprobacion.RECHAZADO):

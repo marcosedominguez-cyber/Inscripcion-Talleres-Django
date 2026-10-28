@@ -27,7 +27,8 @@ def limite_inscripcion(fecha_inicio):
 
 
 def inscripcion_abierta(fecha_inicio, ahora):
-    return ahora < limite_inscripcion(fecha_inicio)
+    # El criterio de aceptación admite las 11:59 para un inicio a las 12:00.
+    return ahora <= limite_inscripcion(fecha_inicio)
 
 
 def limite_espera(cupos):

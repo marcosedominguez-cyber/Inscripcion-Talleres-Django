@@ -246,11 +246,15 @@ class AprobacionYCatalogoTests(SimpleTestCase):
                 )
         registrar.assert_not_called()
 
-    def test_catalogo_consulta_solo_aprobados_futuros_y_con_cupo(self):
-        aprobado = SimpleNamespace(codigo="T-OK")
+    def test_catalogo_consulta_aprobados_futuros_y_conserva_talleres_sin_cupo(self):
+        inicio = datetime(2030, 10, 15, 10, tzinfo=dt_timezone.utc)
+        aprobado = SimpleNamespace(codigo="T-OK", fecha_inicio=inicio)
         manager = Mock()
-        manager.filter.return_value = [aprobado, SimpleNamespace(codigo="T-FULL")]
+        manager.filter.return_value = [
+            aprobado, SimpleNamespace(codigo="T-FULL", fecha_inicio=inicio),
+        ]
         with patch.object(Taller, "objects", manager), \
+             patch("talleres.consultas.timezone.now", return_value=inicio - timedelta(days=1)), \
              patch("talleres.consultas.cupos_disponibles", side_effect=[2, 0]):
             resultado = listar_talleres_proximos()
         self.assertEqual([t.codigo for t in resultado], ["T-OK", "T-FULL"])
@@ -262,14 +266,14 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         inicio = datetime(2030, 10, 15, 10, tzinfo=dt_timezone.utc)
         ahora = inicio - timedelta(seconds=30)
         manager = Mock()
-        manager.filter.return_value = []
+        manager.filter.return_value = [SimpleNamespace(fecha_inicio=inicio)]
         with patch.object(Taller, "objects", manager), \
              patch("talleres.consultas.timezone.now", return_value=ahora):
             resultado = listar_talleres_proximos()
         self.assertEqual(resultado, [])
         self.assertEqual(
             manager.filter.call_args.kwargs["fecha_inicio__gt"],
-            ahora + timedelta(seconds=60),
+            ahora,
         )
 
     def test_catalogo_api_rechaza_anónimo_y_rol_incorrecto(self):

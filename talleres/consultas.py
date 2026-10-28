@@ -3,7 +3,7 @@
 from django.utils import timezone
 
 from talleres.models import Inscripcion, Taller
-from talleres.reglas import MARGEN_CIERRE_INSCRIPCION
+from talleres.reglas import inscripcion_abierta
 
 
 def cupos_disponibles(taller):
@@ -18,9 +18,10 @@ def listar_talleres_proximos():
     ahora = timezone.now()
     candidatos = Taller.objects.filter(
         estado_aprobacion=Taller.Aprobacion.APROBADO,
-        fecha_inicio__gt=ahora + MARGEN_CIERRE_INSCRIPCION,
+        fecha_inicio__gt=ahora,
     )
-    return list(candidatos)
+    # Catálogo e inscripción usan la misma regla, incluido el instante límite.
+    return [taller for taller in candidatos if inscripcion_abierta(taller.fecha_inicio, ahora)]
 
 
 def listar_talleres_instructor(instructor):
