@@ -21,3 +21,8 @@ export function actualizarTaller(codigo, datos) {
 export function refrescarSesion() {
   return api('sesion');
 }
+
+
+export function consultarEspera(codigo) {
+  return solicitudApi(`${URL_TALLERES}${encodeURIComponent(codigo)}/espera/`);
+}

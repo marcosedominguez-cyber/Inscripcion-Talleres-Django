@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  consultarEspera,
   actualizarTaller,
   crearTaller,
   listarTalleres,
@@ -38,6 +39,20 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
+  const [esperas, setEsperas] = useState({});
+  const [consultando, setConsultando] = useState(null);
+
+  async function verEspera(codigo) {
+    setConsultando(codigo);
+    setError('');
+    try {
+      const datos = await consultarEspera(codigo);
+      setEsperas((actual) => ({ ...actual, [codigo]: datos.solicitudes }));
+    } catch (fallo) {
+      if (fallo.status === 401) onSesionCaducada();
+      else setError(fallo.message);
+    } finally { setConsultando(null); }
+  }
 
   const cargar = useCallback(async () => {
     try {
@@ -110,6 +125,18 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
           <p>Estado: <strong>{taller.estado_aprobacion}</strong></p>
           <p>Cupo {taller.cupos}; confirmadas {taller.confirmadas}; libres {taller.plazas_libres}</p>
           <p>{taller.descripcion}</p>
+          <button type="button" className="secundario" disabled={consultando !== null}
+            onClick={() => verEspera(taller.codigo)}>Ver lista de espera</button>
+          {consultando === taller.codigo && <p role="status">Consultando espera…</p>}
+          {esperas[taller.codigo] && <section aria-label={`Lista de espera de ${taller.nombre}`}>
+            <h4>Lista de espera</h4>
+            {esperas[taller.codigo].length === 0 ? <p>No hay participantes en espera.</p>
+              : <ol>{esperas[taller.codigo].map((solicitud) => <li key={solicitud.posicion}>
+                {solicitud.nombre} · <time dateTime={solicitud.fecha_solicitud}>
+                  {new Intl.DateTimeFormat('es-BO', { dateStyle: 'short', timeStyle: 'medium', timeZone: ZONA_HORARIA }).format(new Date(solicitud.fecha_solicitud))}
+                </time>
+              </li>)}</ol>}
+          </section>}
           <button type="button" className="secundario" onClick={() => editar(taller)}>Editar y reenviar a aprobación</button>
         </article>)}
       </div>

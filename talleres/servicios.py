@@ -9,9 +9,9 @@ from django.db.models import F
 from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
 
-from talleres.consultas import cupos_disponibles
+from talleres.consultas import cupos_disponibles, consultar_espera
 from talleres.models import Contador, Inscripcion, Usuario, Taller
-from talleres.reglas import inscripcion_abierta
+from talleres.reglas import inscripcion_abierta, limite_espera
 
 
 class ErrorNegocioTalleres(Exception):
@@ -138,7 +138,10 @@ def actualizar_taller(taller, cambios):
     for campo, valor in cambios.items():
         setattr(taller, campo, valor)
     taller.estado_aprobacion = Taller.Aprobacion.PENDIENTE
-    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos"))
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") + 1)
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") - 1)
+    if len(consultar_espera(taller)) > limite_espera(taller.cupos):
+        raise ValidationError({"cupos": "El nuevo cupo no permite conservar la lista de espera."})
     confirmadas = len(list(Inscripcion.objects.filter(
         taller_id=taller.pk, estado=Inscripcion.Estado.CONFIRMADA
     ).values_list("pk", flat=True)))
@@ -154,8 +157,24 @@ def actualizar_taller(taller, cambios):
     return taller
 
 
-@transaccion_con_reintentos
+class ListaEsperaLlenaError(InscripcionError):
+    """La lista alcanzó su capacidad."""
+
+
+class TallerConCuposError(InscripcionError):
+    """Todavía hay plazas para una inscripción confirmada."""
+
+
 def inscribir_participante(ci, codigo_taller):
+    return _registrar_solicitud(ci, codigo_taller, espera=False)
+
+
+def solicitar_espera(ci, codigo_taller):
+    return _registrar_solicitud(ci, codigo_taller, espera=True)
+
+
+@transaccion_con_reintentos
+def _registrar_solicitud(ci, codigo_taller, *, espera):
     try:
         participante = Usuario.objects.get(
             ci=ci,
@@ -179,11 +198,29 @@ def inscribir_participante(ci, codigo_taller):
         )
     if Inscripcion.objects.filter(participante=participante, taller=taller).exists():
         raise InscripcionDuplicadaError("El participante ya está inscrito en este taller.")
-    if cupos_disponibles(taller) == 0:
+    disponibles = cupos_disponibles(taller)
+    if espera:
+        if disponibles:
+            raise TallerConCuposError("Hay plazas disponibles: utiliza Inscribirme.")
+        if len(consultar_espera(taller)) >= limite_espera(taller.cupos):
+            raise ListaEsperaLlenaError("La lista de espera está llena.")
+    elif disponibles == 0:
         raise CupoAgotadoError("El taller no tiene cupos disponibles.")
-    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos"))
+    # Escritura real compartida: MongoDB debe detectar conflictos entre
+    # solicitudes y ediciones del mismo taller. La transacción revierte ambos pasos.
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") + 1)
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") - 1)
     try:
-        return Inscripcion.objects.create(participante=participante, taller=taller)
+        datos = {"participante": participante, "taller": taller}
+        if espera:
+            datos["estado"] = Inscripcion.Estado.EN_ESPERA
+        inscripcion = Inscripcion.objects.create(**datos)
+        if espera:
+            inscripcion.posicion_espera = next(
+                posicion for posicion, solicitud in enumerate(consultar_espera(taller), 1)
+                if solicitud.pk == inscripcion.pk
+            )
+        return inscripcion
     except IntegrityError:
         raise InscripcionDuplicadaError(
             "El participante ya está inscrito en este taller."

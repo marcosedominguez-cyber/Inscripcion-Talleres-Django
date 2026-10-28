@@ -156,3 +156,25 @@ def taller_instructor(request, codigo):
     except ValidationError as error:
         return JsonResponse({"errores": error.message_dict if hasattr(error, "message_dict") else {"__all__": error.messages}}, status=400)
     return JsonResponse({"taller": _serializar(taller)})
+
+
+@never_cache
+@_manejar_error_db
+@require_http_methods(["GET"])
+def espera_instructor(request, codigo):
+    from talleres.consultas import consultar_espera
+    instructor, error = _instructor(request)
+    if error:
+        return error
+    taller = buscar_taller_instructor(instructor, codigo)
+    if taller is None:
+        return _error("Taller no encontrado.", 404)
+    solicitudes = consultar_espera(taller)
+    personas = {p.pk: p for p in Usuario.objects.filter(
+        pk__in=[s.participante_id for s in solicitudes]
+    )}
+    return JsonResponse({"solicitudes": [
+        {"posicion": posicion, "nombre": personas[s.participante_id].nombre,
+         "fecha_solicitud": s.fecha_solicitud}
+        for posicion, s in enumerate(solicitudes, 1)
+    ]})

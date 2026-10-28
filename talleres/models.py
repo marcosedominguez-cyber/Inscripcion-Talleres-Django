@@ -113,6 +113,7 @@ class Taller(models.Model):
 class Inscripcion(models.Model):
     class Estado(models.TextChoices):
         CONFIRMADA = "confirmada", "Confirmada"
+        EN_ESPERA = "en_espera", "En espera"
 
     id = ObjectIdAutoField(primary_key=True)
     participante = models.ForeignKey(

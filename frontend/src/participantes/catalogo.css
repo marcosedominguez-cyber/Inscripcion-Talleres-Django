@@ -64,3 +64,5 @@
 .pw-logout:focus-visible{outline:3px solid #b76d3d;outline-offset:4px}
 .pw-logout:disabled{opacity:.6;cursor:wait}
 @media(max-width:650px){.pw-user{margin-left:auto;flex-wrap:wrap;justify-content:flex-end;gap:8px}.pw-user-name{max-width:90px}}
+
+.pw-action:disabled { cursor: default; opacity: .65; }

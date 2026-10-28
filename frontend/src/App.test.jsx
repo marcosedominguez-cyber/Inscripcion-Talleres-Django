@@ -74,3 +74,15 @@ test('un rechazo del servidor se muestra sin abrir la cuenta', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Ingresar' }).disabled).toBe(false));
   expect(screen.queryByText('Sesión iniciada')).toBeNull();
 });
+
+
+test('instructor consulta participantes en espera de su taller', async () => {
+  api.mockResolvedValue({ usuario: { rol: 'instructor', nombre_usuario: 'Profesor' } });
+  solicitudApi.mockImplementation(async (ruta) => ruta.endsWith('/espera/')
+    ? { solicitudes: [{ posicion: 1, nombre: 'Ana Espera', fecha_solicitud: '2030-10-15T09:00:00Z' }] }
+    : { talleres: [{ codigo: 'T-001', nombre: 'Taller', cupos: 5, confirmadas: 5, plazas_libres: 0 }] });
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Ver lista de espera' }));
+  await screen.findByText(/Ana Espera/);
+  expect(solicitudApi).toHaveBeenCalledWith('/api/gestion/talleres/T-001/espera/');
+});

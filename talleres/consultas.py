@@ -20,7 +20,7 @@ def listar_talleres_proximos():
         estado_aprobacion=Taller.Aprobacion.APROBADO,
         fecha_inicio__gt=ahora + MARGEN_CIERRE_INSCRIPCION,
     )
-    return [taller for taller in candidatos if cupos_disponibles(taller) > 0]
+    return list(candidatos)
 
 
 def listar_talleres_instructor(instructor):
@@ -35,3 +35,22 @@ def contar_confirmadas(taller):
     return len(list(Inscripcion.objects.filter(
         taller=taller, estado=Inscripcion.Estado.CONFIRMADA
     ).values_list("pk", flat=True)))
+
+
+def consultar_espera(taller):
+    return list(Inscripcion.objects.filter(
+        taller=taller, estado=Inscripcion.Estado.EN_ESPERA,
+    ).order_by("fecha_solicitud", "id"))
+
+
+def resumen_espera(taller, participante):
+    from talleres.reglas import limite_espera
+    solicitudes = consultar_espera(taller)
+    propia = Inscripcion.objects.filter(taller=taller, participante=participante).first()
+    return {
+        "limite_espera": limite_espera(taller.cupos),
+        "lugares_espera": max(0, limite_espera(taller.cupos) - len(solicitudes)),
+        "mi_estado": propia.estado if propia else None,
+        "posicion_espera": next((i for i, s in enumerate(solicitudes, 1)
+                                 if s.participante_id == participante.pk), None),
+    }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { inscribirEnTaller, obtenerCatalogo } from './api.js';
+import { inscribirEnTaller, obtenerCatalogo, solicitarEspera } from './api.js';
 import './catalogo.css';
 
 function FechaTaller({ valor, zona }) {
@@ -14,6 +14,14 @@ function FechaTaller({ valor, zona }) {
 }
 
 function TarjetaTaller({ taller, zona, onInscribirme, enviando }) {
+  const espera = taller.cupos_disponibles === 0;
+  const inscrito = Boolean(taller.mi_estado);
+  const llena = espera && !(taller.lugares_espera > 0);
+  const etiqueta = taller.mi_estado === 'en_espera'
+    ? (taller.posicion_espera ? `En espera · Posición ${taller.posicion_espera}` : 'En espera')
+    : inscrito ? 'Inscripción confirmada'
+    : llena ? 'Lista de espera llena'
+    : espera ? 'Entrar en lista de espera' : 'Inscribirme';
   return (
     <article className="pw-card" aria-labelledby={`taller-${taller.codigo}`}>
       <div className="pw-card-top">
@@ -32,8 +40,8 @@ function TarjetaTaller({ taller, zona, onInscribirme, enviando }) {
         <span>Disponibles</span>
         <strong>{taller.cupos_disponibles}</strong>
       </div>
-      <button className="pw-action" type="button" onClick={() => onInscribirme(taller.codigo)} disabled={enviando}>
-        {enviando ? 'Inscribiendo…' : 'Inscribirme'}
+      <button className="pw-action" type="button" onClick={() => onInscribirme(taller.codigo, espera)} disabled={enviando || inscrito || llena}>
+        {enviando ? 'Procesando…' : etiqueta}
       </button>
     </article>
   );
@@ -73,11 +81,20 @@ export default function CatalogoParticipante({
   const datos = estado.tipo === 'listo' ? estado.datos : null;
   const nombre = datos?.usuario?.nombre || usuario.nombre_usuario;
 
-  async function inscribirme(codigo) {
+  async function inscribirme(codigo, espera = false) {
+    if (codigoEnviando) return;
     setCodigoEnviando(codigo);
     setMensajeInscripcion(null);
     try {
-      const resultado = await inscribirEnTaller(codigo);
+      const resultado = await (espera ? solicitarEspera : inscribirEnTaller)(codigo);
+      // Conservar el resultado guardado aunque falle la lectura posterior.
+      setEstado((actual) => actual.tipo !== 'listo' ? actual : {
+        ...actual, datos: { ...actual.datos, talleres: actual.datos.talleres.map((taller) =>
+          taller.codigo === codigo ? { ...taller,
+            mi_estado: resultado.inscripcion?.estado || (espera ? 'en_espera' : 'confirmada'),
+            posicion_espera: resultado.inscripcion?.posicion_espera ?? taller.posicion_espera,
+          } : taller) },
+      });
       setMensajeInscripcion({ tipo: 'exito', texto: resultado.mensaje || 'Te inscribiste correctamente.' });
       try {
         const actualizado = await cargarCatalogo({});
@@ -85,7 +102,7 @@ export default function CatalogoParticipante({
       } catch {
         setMensajeInscripcion({
           tipo: 'exito',
-          texto: 'Te inscribiste correctamente. No se pudo actualizar el catálogo; vuelve a intentarlo en unos segundos.',
+          texto: `${resultado.mensaje || 'Solicitud guardada.'} No se pudo actualizar el catálogo; recarga para consultar tu estado.`,
         });
       }
     } catch (fallo) {
@@ -172,7 +189,7 @@ export default function CatalogoParticipante({
             <div className="pw-grid">
               {datos.talleres.length > 0 ? datos.talleres.map((taller) => (
                 <TarjetaTaller key={taller.codigo} taller={taller} zona={datos.zona_horaria}
-                  onInscribirme={inscribirme} enviando={codigoEnviando === taller.codigo} />
+                  onInscribirme={inscribirme} enviando={codigoEnviando !== null} />
               )) : (
                 <div className="pw-empty" role="status">
                   <div className="pw-empty-icon" aria-hidden="true">✳</div>
