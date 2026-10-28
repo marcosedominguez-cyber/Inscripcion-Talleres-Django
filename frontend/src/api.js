@@ -25,9 +25,3 @@ export async function solicitudApi(url, { method = 'GET', datos } = {}) {
   }
   return result;
 }
-
-export function api(path, datos) {
-  return solicitudApi(`/api/cuentas/${path}/`, {
-    method: datos === undefined ? 'GET' : 'POST', datos,
-  });
-}

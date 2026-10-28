@@ -29,9 +29,9 @@ class AdminSistemaModelAdmin(admin.ModelAdmin):
 
 @admin.register(Usuario, site=admin_site)
 class UsuarioAdmin(AdminSistemaModelAdmin):
-    list_display = ("nombre", "ci", "rol", "codigo", "cuenta")
+    list_display = ("nombre", "ci", "rol", "cuenta")
     list_filter = ("rol",)
-    search_fields = ("nombre", "ci", "codigo", "cuenta__username")
+    search_fields = ("nombre", "ci", "cuenta__username")
     list_select_related = ("cuenta",)
 
 

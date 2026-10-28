@@ -8,15 +8,17 @@ from contextlib import nullcontext
 
 from django.contrib.auth.models import AnonymousUser
 from django.middleware.csrf import CsrfViewMiddleware
+from django.db import IntegrityError
 from django.test import RequestFactory, SimpleTestCase
 
-from proyecto.reglas_inscripciones import (
+from talleres.servicios import (
     CupoAgotadoError,
+    DatosParticipanteInvalidosError,
     InscripcionDuplicadaError,
     PlazoInscripcionVencidoError,
     TallerNoAprobadoError,
 )
-from talleres import services
+from talleres import servicios
 from talleres.api_participantes import inscripcion_participante_api
 from talleres.models import Inscripcion, Taller, Usuario
 
@@ -26,8 +28,12 @@ class ServicioInscripcionTests(SimpleTestCase):
 
     ahora = datetime(2030, 10, 15, 9, 0, tzinfo=dt_timezone.utc)
 
+    def test_nombre_vacio_usa_excepcion_web_sin_persistir(self):
+        with self.assertRaises(DatosParticipanteInvalidosError):
+            servicios.registrar_participante("   ", "11111111")
+
     def ejecutar(self, *, estado=Taller.Aprobacion.APROBADO, inicio=None,
-                 duplicada=False, disponibles=1, ahora=None):
+                 duplicada=False, disponibles=1, ahora=None, create_error=None):
         participante = SimpleNamespace(pk="participante-id")
         taller = SimpleNamespace(
             pk="taller-id", fecha_inicio=inicio or self.ahora + timedelta(minutes=5),
@@ -37,21 +43,36 @@ class ServicioInscripcionTests(SimpleTestCase):
         manager_inscripciones = Mock()
         manager_inscripciones.filter.return_value.exists.return_value = duplicada
         manager_inscripciones.create.return_value = inscripcion
+        manager_inscripciones.create.side_effect = create_error
         manager_talleres = Mock()
         manager_talleres.get.return_value = taller
-        with patch.object(services, "atomic", return_value=nullcontext()),              patch.object(services.Usuario, "objects") as usuarios,              patch.object(services.Taller, "objects", manager_talleres),              patch.object(services.Inscripcion, "objects", manager_inscripciones),              patch.object(services, "cupos_disponibles", return_value=disponibles),              patch.object(services.timezone, "now", return_value=ahora or self.ahora):
+        with (
+            patch.object(servicios, "atomic", return_value=nullcontext()),
+            patch.object(servicios.Usuario, "objects") as usuarios,
+            patch.object(servicios.Taller, "objects", manager_talleres),
+            patch.object(servicios.Inscripcion, "objects", manager_inscripciones),
+            patch.object(servicios, "cupos_disponibles", return_value=disponibles),
+            patch.object(servicios.timezone, "now", return_value=ahora or self.ahora),
+        ):
             usuarios.get.return_value = participante
-            resultado = services.inscribir_participante("12345678", "T-001")
+            resultado = servicios.inscribir_participante("12345678", "T-001")
         return resultado, participante, taller, manager_talleres, manager_inscripciones, usuarios
 
-    def test_inscripcion_exitosa_en_el_limite_de_un_minuto(self):
-        limite = self.ahora + timedelta(minutes=5) - timedelta(minutes=1)
-        resultado, participante, taller, _, inscripciones, usuarios = self.ejecutar(
-            inicio=self.ahora + timedelta(minutes=5), ahora=limite,
+    def test_acepta_inscripcion_un_segundo_antes_del_limite(self):
+        inicio = self.ahora + timedelta(minutes=5)
+        limite = inicio - timedelta(minutes=1)
+        resultado, participante, taller, talleres, inscripciones, usuarios = self.ejecutar(
+            inicio=inicio, ahora=limite - timedelta(seconds=1),
         )
         self.assertEqual(resultado.pk, "inscripcion-id")
         usuarios.get.assert_called_once()
+        talleres.filter.assert_called_once_with(pk=taller.pk)
         inscripciones.create.assert_called_once_with(participante=participante, taller=taller)
+
+    def test_rechaza_inscripcion_en_el_limite_exacto_de_un_minuto(self):
+        inicio = self.ahora + timedelta(minutes=5)
+        with self.assertRaises(PlazoInscripcionVencidoError):
+            self.ejecutar(inicio=inicio, ahora=inicio - timedelta(minutes=1))
 
     def test_rechaza_taller_no_aprobado(self):
         for estado in (Taller.Aprobacion.PENDIENTE, Taller.Aprobacion.RECHAZADO):
@@ -64,7 +85,11 @@ class ServicioInscripcionTests(SimpleTestCase):
         with self.assertRaises(CupoAgotadoError):
             self.ejecutar(disponibles=0)
 
-    def test_rechaza_menos_de_un_minuto_y_limite_vencido(self):
+    def test_convierte_carrera_de_inscripcion_duplicada_en_error_de_negocio(self):
+        with self.assertRaises(InscripcionDuplicadaError):
+            self.ejecutar(create_error=IntegrityError("duplicada"))
+
+    def test_rechaza_despues_del_limite_y_al_inicio_del_taller(self):
         inicio = self.ahora + timedelta(minutes=5)
         for ahora in (inicio - timedelta(seconds=59), inicio, inicio + timedelta(seconds=1)):
             with self.subTest(ahora=ahora), self.assertRaises(PlazoInscripcionVencidoError):
@@ -88,16 +113,29 @@ class ApiInscripcionParticipanteTests(SimpleTestCase):
         self.assertEqual(inscripcion_participante_api(self.solicitar()).status_code, 401)
         instructor = SimpleNamespace(
             is_authenticated=True,
+            is_active=True,
             perfil=SimpleNamespace(rol=Usuario.Rol.INSTRUCTOR, ci="12345678"),
         )
         self.assertEqual(
             inscripcion_participante_api(self.solicitar(instructor, {"codigo_taller": "T-1"})).status_code,
             403,
         )
+        inactivo = SimpleNamespace(
+            is_authenticated=True,
+            is_active=False,
+            perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE, ci="12345678"),
+        )
+        self.assertEqual(
+            inscripcion_participante_api(
+                self.solicitar(inactivo, {"codigo_taller": "T-1"})
+            ).status_code,
+            403,
+        )
 
     def test_usa_identidad_de_perfil_y_no_acepta_identificador_cliente(self):
         participante = SimpleNamespace(
             is_authenticated=True,
+            is_active=True,
             perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE, ci="12345678"),
         )
         creado = SimpleNamespace(pk="inscripcion-id", estado=Inscripcion.Estado.CONFIRMADA)
@@ -131,6 +169,7 @@ class ApiInscripcionParticipanteTests(SimpleTestCase):
     def test_responde_conflicto_de_regla_de_negocio(self):
         participante = SimpleNamespace(
             is_authenticated=True,
+            is_active=True,
             perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE, ci="12345678"),
         )
         with patch(

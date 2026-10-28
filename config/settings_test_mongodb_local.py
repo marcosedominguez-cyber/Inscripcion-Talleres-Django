@@ -70,5 +70,5 @@ AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
 ]
 USE_TZ = True
-TIME_ZONE = "UTC"
+TIME_ZONE = "America/La_Paz"
 LANGUAGE_CODE = "es"

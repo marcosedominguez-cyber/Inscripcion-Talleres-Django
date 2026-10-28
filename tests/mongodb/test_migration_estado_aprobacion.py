@@ -53,10 +53,9 @@ def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo():
             "codigo": f"K1-MIG-{object_id}",
             "nombre": "Taller de prueba de migración",
             "descripcion": "Documento sintético local",
-            "cupos": 3,
+            "cupos": 4,
             "fecha_inicio": ahora + timedelta(days=2),
             "fecha_fin": ahora + timedelta(days=2, hours=2),
-            "revision": 0,
             "instructor_id": None,
         }
         if estado != "ausente":
@@ -105,7 +104,7 @@ def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo():
     }) == 0
     assert resultados_repetidos == resultados
 
-    from talleres.consultas_participantes import listar_talleres_proximos
+    from talleres.consultas import listar_talleres_proximos
 
     publicados = {
         taller.codigo for taller in listar_talleres_proximos()

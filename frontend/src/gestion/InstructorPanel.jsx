@@ -1,16 +1,33 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, solicitudApi } from './api.js';
+import {
+  actualizarTaller,
+  crearTaller,
+  listarTalleres,
+  refrescarSesion,
+} from './api.js';
 
-const URL_TALLERES = '/api/gestion/talleres/';
+const ZONA_HORARIA = 'America/La_Paz';
+
+function aFechaLocal(valor) {
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return '';
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONA_HORARIA,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(fecha);
+  const parte = (tipo) => partes.find((elemento) => elemento.type === tipo)?.value || '';
+  return `${parte('year')}-${parte('month')}-${parte('day')}T${parte('hour')}:${parte('minute')}`;
+}
 
 function valoresIniciales(taller = null) {
   return taller ? {
     nombre: taller.nombre,
     descripcion: taller.descripcion,
     cupos: taller.cupos,
-    fecha_inicio: taller.fecha_inicio.slice(0, 16),
-    fecha_fin: taller.fecha_fin.slice(0, 16),
-  } : { nombre: '', descripcion: '', cupos: 1, fecha_inicio: '', fecha_fin: '' };
+    fecha_inicio: aFechaLocal(taller.fecha_inicio),
+    fecha_fin: aFechaLocal(taller.fecha_fin),
+  } : { nombre: '', descripcion: '', cupos: 4, fecha_inicio: '', fecha_fin: '' };
 }
 
 export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaducada }) {
@@ -24,7 +41,7 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
 
   const cargar = useCallback(async () => {
     try {
-      const resultado = await solicitudApi(URL_TALLERES);
+      const resultado = await listarTalleres();
       setTalleres(resultado.talleres);
     } catch (fallo) {
       if (fallo.status === 401) onSesionCaducada();
@@ -48,11 +65,11 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
     setError('');
     setMensaje('');
     try {
-      await api('sesion');
+      await refrescarSesion();
       const body = { ...datos, cupos: Number(datos.cupos) };
       const resultado = editando
-        ? await solicitudApi(`${URL_TALLERES}${encodeURIComponent(editando)}/`, { method: 'PATCH', datos: body })
-        : await solicitudApi(URL_TALLERES, { method: 'POST', datos: body });
+        ? await actualizarTaller(editando, body)
+        : await crearTaller(body);
       setMensaje(editando ? 'Cambios guardados. La propuesta vuelve a revisión.' : 'Propuesta enviada para aprobación.');
       setEditando(null);
       setDatos(valoresIniciales());
@@ -68,7 +85,7 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
 
   return <main className="acceso gestion-instructor">
     <h1>Gestión de talleres</h1>
-    <p>Hola, {usuario.nombre_usuario}. Las fechas se ingresan en UTC.</p>
+    <p>Hola, {usuario.nombre_usuario}. Las fechas se ingresan en hora de Bolivia (America/La_Paz).</p>
     {error && <p className="error" role="alert">{error}</p>}
     {mensaje && <p className="mensaje" role="status">{mensaje}</p>}
     <section aria-labelledby="form-taller-titulo">
@@ -76,9 +93,9 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
       <form onSubmit={guardar}>
         <label>Nombre<input required maxLength="200" value={datos.nombre} onChange={(e) => cambiar('nombre', e.target.value)} /></label>
         <label>Descripción<textarea value={datos.descripcion} onChange={(e) => cambiar('descripcion', e.target.value)} /></label>
-        <label>Cupo máximo<input required type="number" min="1" value={datos.cupos} onChange={(e) => cambiar('cupos', e.target.value)} /></label>
-        <label>Inicio (UTC)<input required type="datetime-local" value={datos.fecha_inicio} onChange={(e) => cambiar('fecha_inicio', e.target.value)} /></label>
-        <label>Fin (UTC)<input required type="datetime-local" value={datos.fecha_fin} onChange={(e) => cambiar('fecha_fin', e.target.value)} /></label>
+        <label>Cupo máximo<input required type="number" min="4" max="40" value={datos.cupos} onChange={(e) => cambiar('cupos', e.target.value)} /></label>
+        <label>Inicio (hora de Bolivia)<input required type="datetime-local" value={datos.fecha_inicio} onChange={(e) => cambiar('fecha_inicio', e.target.value)} /></label>
+        <label>Fin (hora de Bolivia)<input required type="datetime-local" value={datos.fecha_fin} onChange={(e) => cambiar('fecha_fin', e.target.value)} /></label>
         <button disabled={enviando}>{enviando ? 'Guardando…' : editando ? 'Guardar cambios' : 'Enviar propuesta'}</button>
         {editando && <button type="button" className="secundario" onClick={() => { setEditando(null); setDatos(valoresIniciales()); }}>Cancelar edición</button>}
       </form>

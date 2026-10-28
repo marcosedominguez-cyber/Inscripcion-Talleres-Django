@@ -1,7 +1,8 @@
 """Pruebas unitarias de K1: no crean modelos ni acceden a una base de datos."""
 
 import json
-from datetime import datetime, timezone as dt_timezone
+from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone as dt_timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -10,13 +11,12 @@ from django.core.exceptions import ValidationError
 from django.middleware.csrf import CsrfViewMiddleware
 from django.test import RequestFactory, SimpleTestCase
 
-from cuentas import views as cuentas_views
 from talleres import api_gestion
-from talleres import services as taller_services
+from talleres import servicios as taller_services
 from talleres.admin import TallerAdmin
 from talleres.admin_site import admin_site
 from talleres.api_participantes import catalogo_talleres_api
-from talleres.consultas_participantes import listar_talleres_proximos
+from talleres.consultas import listar_talleres_proximos
 from talleres.models import Inscripcion, Taller, Usuario
 
 
@@ -24,13 +24,13 @@ class GestionInstructorTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
         self.instructor = SimpleNamespace(pk="instructor-id", rol=Usuario.Rol.INSTRUCTOR)
-        self.user = SimpleNamespace(is_authenticated=True, perfil=self.instructor)
+        self.user = SimpleNamespace(is_authenticated=True, is_active=True, perfil=self.instructor)
         self.datos = {
             "nombre": "Taller de prueba",
             "descripcion": "Descripción",
-            "cupos": 3,
+            "cupos": 4,
             "fecha_inicio": "2030-10-15T10:00",
-            "fecha_fin": "2030-10-15T12:00",
+            "fecha_fin": "2030-10-16T10:00",
         }
 
     def solicitud(self, method, path, datos=None, user=None):
@@ -51,7 +51,7 @@ class GestionInstructorTests(SimpleTestCase):
         self.assertEqual(response.status_code, 201)
         kwargs = crear.call_args.kwargs
         self.assertIs(kwargs["instructor"], self.instructor)
-        self.assertEqual(kwargs["cupos"], 3)
+        self.assertEqual(kwargs["cupos"], 4)
         self.assertNotIn("instructor_id", kwargs)
 
     def test_payload_no_puede_asignar_propietario_ni_estado(self):
@@ -96,16 +96,20 @@ class GestionInstructorTests(SimpleTestCase):
 
     def test_edicion_propia_revalida_y_reenvia_a_aprobacion(self):
         taller = SimpleNamespace(
-            codigo="T-OWN", nombre="Anterior", descripcion="", cupos=3,
+            pk="taller-id", codigo="T-OWN", nombre="Anterior", descripcion="", cupos=4,
             fecha_inicio=datetime(2030, 10, 15, 10, tzinfo=dt_timezone.utc),
-            fecha_fin=datetime(2030, 10, 15, 12, tzinfo=dt_timezone.utc),
+            fecha_fin=datetime(2030, 10, 16, 10, tzinfo=dt_timezone.utc),
             estado_aprobacion=Taller.Aprobacion.APROBADO,
             full_clean=Mock(), save=Mock(),
         )
         manager = Mock()
         manager.filter.return_value.first.return_value = taller
+        inscripciones = Mock()
+        inscripciones.filter.return_value.values_list.return_value = ["inscripcion-1"]
         request = self.solicitud("patch", "/api/gestion/talleres/T-OWN/", {"nombre": "Nuevo"})
         with patch.object(Taller, "objects", manager), \
+             patch.object(taller_services.Inscripcion, "objects", inscripciones), \
+             patch("talleres.servicios.atomic", return_value=nullcontext()), \
              patch.object(api_gestion, "_serializar", return_value={"codigo": "T-OWN"}):
             response = api_gestion.taller_instructor(request, "T-OWN")
         self.assertEqual(response.status_code, 200)
@@ -114,16 +118,49 @@ class GestionInstructorTests(SimpleTestCase):
         taller.full_clean.assert_called_once_with()
         taller.save.assert_called_once_with()
 
+    def test_edicion_rechaza_cupo_menor_a_las_inscripciones_confirmadas(self):
+        taller = SimpleNamespace(
+            pk="taller-id", codigo="T-OWN", nombre="Anterior", descripcion="", cupos=4,
+            fecha_inicio=datetime(2030, 10, 15, 10, tzinfo=dt_timezone.utc),
+            fecha_fin=datetime(2030, 10, 16, 10, tzinfo=dt_timezone.utc),
+            estado_aprobacion=Taller.Aprobacion.APROBADO,
+            full_clean=Mock(), save=Mock(),
+        )
+        manager = Mock()
+        manager.filter.return_value.first.return_value = taller
+        inscripciones = Mock()
+        inscripciones.filter.return_value.values_list.return_value = [
+            "i-1", "i-2", "i-3", "i-4", "i-5",
+        ]
+        request = self.solicitud(
+            "patch", "/api/gestion/talleres/T-OWN/", {"cupos": 4}
+        )
+        with patch.object(Taller, "objects", manager), \
+             patch.object(taller_services.Inscripcion, "objects", inscripciones), \
+             patch("talleres.servicios.atomic", return_value=nullcontext()):
+            response = api_gestion.taller_instructor(request, "T-OWN")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cupos", json.loads(response.content)["errores"])
+        taller.save.assert_not_called()
+
     def test_anónimo_y_rol_incorrecto_no_acceden(self):
         anonymous = self.solicitud("get", "/api/gestion/talleres/", user=AnonymousUser())
         response = api_gestion.talleres_instructor(anonymous)
         self.assertEqual(response.status_code, 401)
         participante = SimpleNamespace(
             is_authenticated=True,
+            is_active=True,
             perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE),
         )
         response = api_gestion.talleres_instructor(
             self.solicitud("get", "/api/gestion/talleres/", user=participante)
+        )
+        self.assertEqual(response.status_code, 403)
+        inactivo = SimpleNamespace(
+            is_authenticated=True, is_active=False, perfil=self.instructor,
+        )
+        response = api_gestion.talleres_instructor(
+            self.solicitud("get", "/api/gestion/talleres/", user=inactivo)
         )
         self.assertEqual(response.status_code, 403)
 
@@ -135,6 +172,24 @@ class GestionInstructorTests(SimpleTestCase):
         with patch.object(api_gestion, "proponer_taller") as crear:
             self.assertEqual(api_gestion.talleres_instructor(incompleto).status_code, 400)
             self.assertEqual(api_gestion.talleres_instructor(invertido).status_code, 400)
+        crear.assert_not_called()
+
+    def test_cupo_y_duracion_fuera_de_rango_se_rechazan(self):
+        casos = (
+            {"cupos": 3},
+            {"cupos": 41},
+            {"fecha_fin": "2030-10-15T11:00"},
+            {"fecha_fin": "2030-10-23T10:00"},
+        )
+        with patch.object(api_gestion, "proponer_taller") as crear:
+            for cambio in casos:
+                with self.subTest(cambio=cambio):
+                    request = self.solicitud(
+                        "post", "/api/gestion/talleres/", {**self.datos, **cambio}
+                    )
+                    self.assertEqual(
+                        api_gestion.talleres_instructor(request).status_code, 400
+                    )
         crear.assert_not_called()
 
     def test_csrf_middleware_rechaza_post_sin_token(self):
@@ -162,8 +217,8 @@ class AprobacionYCatalogoTests(SimpleTestCase):
              patch.object(taller_services, "_preparar_contador"), \
              patch.object(taller_services, "_crear_taller", return_value="guardado"):
             propuesta = taller_services.proponer_taller(
-                instructor, "Propuesta", 2,
-                datetime(2030, 10, 15, 10), datetime(2030, 10, 15, 12),
+                instructor, "Propuesta", 4,
+                datetime(2030, 10, 15, 10), datetime(2030, 10, 16, 10),
             )
             self.assertEqual(propuesta, "guardado")
             self.assertEqual(
@@ -172,7 +227,7 @@ class AprobacionYCatalogoTests(SimpleTestCase):
             )
             modelo.reset_mock()
             taller_services.registrar_taller(
-                "CLI", 2, datetime(2030, 10, 15, 10), datetime(2030, 10, 15, 12)
+                "CLI", 4, datetime(2030, 10, 15, 10), datetime(2030, 10, 16, 10)
             )
             self.assertEqual(
                 modelo.call_args.kwargs["estado_aprobacion"],
@@ -184,8 +239,8 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         with patch.object(taller_services, "registrar_taller") as registrar:
             with self.assertRaises(ValidationError):
                 taller_services.proponer_taller(
-                    participante, "Inválido", 1,
-                    datetime(2030, 10, 15, 10), datetime(2030, 10, 15, 12),
+                    participante, "Inválido", 4,
+                    datetime(2030, 10, 15, 10), datetime(2030, 10, 16, 10),
                 )
         registrar.assert_not_called()
 
@@ -194,12 +249,26 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         manager = Mock()
         manager.filter.return_value = [aprobado, SimpleNamespace(codigo="T-FULL")]
         with patch.object(Taller, "objects", manager), \
-             patch("talleres.consultas_participantes.cupos_disponibles", side_effect=[2, 0]):
+             patch("talleres.consultas.cupos_disponibles", side_effect=[2, 0]):
             resultado = listar_talleres_proximos()
         self.assertEqual(resultado, [aprobado])
         filtros = manager.filter.call_args.kwargs
         self.assertEqual(filtros["estado_aprobacion"], Taller.Aprobacion.APROBADO)
         self.assertIn("fecha_inicio__gt", filtros)
+
+    def test_catalogo_cierra_inscripciones_un_minuto_antes_del_inicio(self):
+        inicio = datetime(2030, 10, 15, 10, tzinfo=dt_timezone.utc)
+        ahora = inicio - timedelta(seconds=30)
+        manager = Mock()
+        manager.filter.return_value = []
+        with patch.object(Taller, "objects", manager), \
+             patch("talleres.consultas.timezone.now", return_value=ahora):
+            resultado = listar_talleres_proximos()
+        self.assertEqual(resultado, [])
+        self.assertEqual(
+            manager.filter.call_args.kwargs["fecha_inicio__gt"],
+            ahora + timedelta(seconds=60),
+        )
 
     def test_catalogo_api_rechaza_anónimo_y_rol_incorrecto(self):
         factory = RequestFactory()
@@ -209,6 +278,7 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         instructor = factory.get("/api/participantes/talleres/")
         instructor.user = SimpleNamespace(
             is_authenticated=True,
+            is_active=True,
             perfil=SimpleNamespace(rol=Usuario.Rol.INSTRUCTOR),
         )
         self.assertEqual(catalogo_talleres_api(instructor).status_code, 403)
@@ -218,6 +288,7 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         participante = factory.get("/api/participantes/talleres/")
         participante.user = SimpleNamespace(
             is_authenticated=True,
+            is_active=True,
             perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE),
             get_full_name=lambda: "",
             get_username=lambda: "persona",
@@ -265,21 +336,3 @@ class AprobacionYCatalogoTests(SimpleTestCase):
         pendientes.update.assert_called_once_with(
             estado_aprobacion=Taller.Aprobacion.RECHAZADO
         )
-
-
-class RegistroPublicoK1Tests(SimpleTestCase):
-    def test_registro_rechaza_banderas_de_staff_o_superusuario_antes_de_persistir(self):
-        request = RequestFactory().post(
-            "/api/cuentas/registro/",
-            data=json.dumps({
-                "nombre_usuario": "intento", "ci": "12345", "rol": "instructor",
-                "contrasena": "una-clave", "confirmar_contrasena": "una-clave",
-                "is_staff": "true",
-            }),
-            content_type="application/json",
-        )
-        request.user = AnonymousUser()
-        with patch.object(cuentas_views, "registrar_cuenta") as registrar:
-            response = cuentas_views.registro(request)
-        self.assertEqual(response.status_code, 400)
-        registrar.assert_not_called()

@@ -1,2 +1,2 @@
-# Dependencias de las pruebas aisladas de reglas; no requieren Django ni MongoDB.
-pytest>=8,<10
+# Dependencias para ejecutar la suite completa; CI usa requirements.txt.
+-r requirements.txt

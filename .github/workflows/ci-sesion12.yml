@@ -1,4 +1,4 @@
-name: Sesion 12 - contrato del flujo
+name: Integracion continua - pruebas
 
 on:
   push:
@@ -26,26 +26,35 @@ jobs:
           python --version
           git rev-parse HEAD
 
-      - name: Instalar dependencias declaradas
-        run: python -m pip install -r requirements-ci.txt
+      - name: Instalar dependencias Python
+        run: python -m pip install -r requirements.txt
 
-      # Para paquetes src/ con pyproject.toml, agregar aqui su instalacion:
-      # - run: python -m pip install -e .
+      - name: Ejecutar pruebas backend
+        run: |
+          mkdir -p evidencias
+          python -m pytest -q --junitxml=evidencias/backend-junit.xml
 
-      - name: Comprobar el contrato del flujo
-        run: >-
-          python -m pytest
-          tests/test_reglas.py::test_inscribe_participante_y_confirma_la_plaza_disponible
-          tests/test_reglas.py::test_rechaza_inscripcion_duplicada_sin_ocupar_otro_cupo
-          tests/test_reglas.py::test_inscripcion_en_el_ultimo_cupo_deja_el_taller_sin_disponibilidad
-          -q --junitxml=evidencias/sesion12-junit.xml
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias del frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Ejecutar pruebas del frontend
+        working-directory: frontend
+        run: npm test -- --reporter=junit --outputFile=../evidencias/frontend-junit.xml
 
       - name: Conservar el resultado de las pruebas
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: resultados-sesion12-${{ github.run_id }}-${{ github.run_attempt }}
-          path: evidencias/sesion12-junit.xml
+          name: resultados-pruebas-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidencias/*.xml
           if-no-files-found: warn
           retention-days: 14
 
@@ -57,8 +66,7 @@ jobs:
         if: ${{ success() && github.ref == 'refs/heads/main' }}
         uses: actions/upload-artifact@v4
         with:
-          name: candidato-sesion12-${{ github.sha }}
+          name: candidato-codigo-${{ github.sha }}
           path: entrega-${{ github.sha }}.zip
           if-no-files-found: error
           retention-days: 14
-

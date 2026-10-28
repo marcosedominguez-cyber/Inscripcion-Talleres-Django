@@ -1,25 +1,57 @@
-"""Operaciones del menú sobre MongoDB, conservando los errores del dominio."""
+"""Servicios de negocio para gestionar participantes, talleres e inscripciones."""
 
 import time
-from datetime import timedelta
 from functools import wraps
 
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 from django.db import DatabaseError, IntegrityError
-from django.db.models import F, Q
+from django.db.models import F
+from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
 
-from proyecto.reglas_inscripciones import (
-    CupoAgotadoError, InscripcionDuplicadaError,
-    ParticipanteNoEncontradoError, TallerNoEncontradoError,
-    TallerNoAprobadoError, PlazoInscripcionVencidoError,
-)
-from proyecto.reglas_usuarios import DatosParticipanteInvalidosError
+from talleres.consultas import cupos_disponibles
 from talleres.models import Contador, Inscripcion, Usuario, Taller
+from talleres.reglas import inscripcion_abierta
 
 
-def _transaccion(funcion):
+class ErrorNegocioTalleres(Exception):
+    """Clase base para errores de negocio emitidos por los servicios web."""
+
+
+class DatosParticipanteInvalidosError(ErrorNegocioTalleres, ValueError):
+    """Los datos del participante no cumplen las reglas de la aplicación web."""
+
+
+class InscripcionError(ErrorNegocioTalleres):
+    """Error base de las operaciones web de inscripción."""
+
+
+class ParticipanteNoEncontradoError(InscripcionError, LookupError):
+    """No existe el participante solicitado."""
+
+
+class TallerNoEncontradoError(InscripcionError, LookupError):
+    """No existe el taller solicitado."""
+
+
+class InscripcionDuplicadaError(InscripcionError):
+    """El participante ya está inscrito en el taller."""
+
+
+class CupoAgotadoError(InscripcionError):
+    """El taller no tiene plazas disponibles."""
+
+
+class TallerNoAprobadoError(InscripcionError):
+    """El taller todavía no fue aprobado para inscripción."""
+
+
+class PlazoInscripcionVencidoError(InscripcionError):
+    """El plazo de inscripción ya venció."""
+
+
+def transaccion_con_reintentos(funcion):
+    """Reintenta transacciones que fallan con una etiqueta transitoria."""
     @wraps(funcion)
     def ejecutar(*args, **kwargs):
         for intento in range(5):
@@ -54,22 +86,23 @@ def _siguiente_codigo(nombre, prefijo):
     return f"{prefijo}-{Contador.objects.get(nombre=nombre).valor:03d}"
 
 
-@_transaccion
-def _crear_participante(nombre):
-    participante = Usuario(codigo=_siguiente_codigo("participantes", "P"), nombre=nombre)
+def registrar_participante(nombre, ci):
+    if not nombre.strip():
+        raise DatosParticipanteInvalidosError("El nombre del participante es obligatorio.")
+    participante = Usuario(
+        nombre=nombre.strip(), ci=ci, rol=Usuario.Rol.PARTICIPANTE
+    )
     participante.full_clean()
+    return _guardar_participante(participante)
+
+
+@transaccion_con_reintentos
+def _guardar_participante(participante):
     participante.save()
     return participante
 
 
-def registrar_participante(nombre):
-    if not nombre.strip():
-        raise DatosParticipanteInvalidosError("El nombre del participante es obligatorio.")
-    _preparar_contador("participantes")
-    return _crear_participante(nombre.strip())
-
-
-@_transaccion
+@transaccion_con_reintentos
 def _crear_taller(datos):
     taller = Taller(codigo=_siguiente_codigo("talleres", "T"), **datos)
     taller.full_clean()
@@ -80,7 +113,6 @@ def _crear_taller(datos):
 def registrar_taller(nombre, cupos, fecha_inicio, fecha_fin, descripcion="", *,
                      instructor=None):
     # Ninguna alta del servicio se publica antes de una decisión administrativa.
-    # El parámetro opcional conserva la firma anterior de CLI/servicios.
     datos = dict(nombre=nombre, cupos=cupos, fecha_inicio=fecha_inicio,
                  fecha_fin=fecha_fin, descripcion=descripcion,
                  instructor=instructor,
@@ -101,35 +133,47 @@ def proponer_taller(instructor, nombre, cupos, fecha_inicio, fecha_fin, descripc
     )
 
 
-def cupos_disponibles(taller):
-    # count() del backend 6.0 usa $unionWith, no admitido en transacciones.
+@transaccion_con_reintentos
+def actualizar_taller(taller, cambios):
+    for campo, valor in cambios.items():
+        setattr(taller, campo, valor)
+    taller.estado_aprobacion = Taller.Aprobacion.PENDIENTE
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos"))
     confirmadas = len(list(Inscripcion.objects.filter(
         taller_id=taller.pk, estado=Inscripcion.Estado.CONFIRMADA
-    ).values_list("pk", flat=True)[:taller.cupos]))
-    return max(taller.cupos - confirmadas, 0)
+    ).values_list("pk", flat=True)))
+    if taller.cupos < confirmadas:
+        raise ValidationError({
+            "cupos": (
+                f"No se puede reducir el cupo a {taller.cupos}: hay "
+                f"{confirmadas} inscripciones confirmadas."
+            )
+        })
+    taller.full_clean()
+    taller.save()
+    return taller
 
 
-@_transaccion
-def inscribir_participante(codigo_participante, codigo_taller):
+@transaccion_con_reintentos
+def inscribir_participante(ci, codigo_taller):
     try:
         participante = Usuario.objects.get(
-            Q(codigo=codigo_participante) | Q(ci=codigo_participante),
+            ci=ci,
             rol=Usuario.Rol.PARTICIPANTE,
         )
     except Usuario.DoesNotExist:
         raise ParticipanteNoEncontradoError(
-            f"No existe un participante con el ID {codigo_participante!r}."
+            f"No existe un participante con la CI {ci!r}."
         ) from None
     try:
         taller = Taller.objects.get(codigo=codigo_taller)
     except Taller.DoesNotExist:
         raise TallerNoEncontradoError(
-            f"No existe un taller con el ID {codigo_taller!r}."
+            f"No existe un taller con el código {codigo_taller!r}."
         ) from None
     if taller.estado_aprobacion != Taller.Aprobacion.APROBADO:
         raise TallerNoAprobadoError("El taller todavía no está aprobado para inscripciones.")
-    limite = taller.fecha_inicio - timedelta(minutes=1)
-    if timezone.now() > limite:
+    if not inscripcion_abierta(taller.fecha_inicio, timezone.now()):
         raise PlazoInscripcionVencidoError(
             "La inscripción cierra un minuto antes del inicio del taller."
         )
@@ -137,7 +181,10 @@ def inscribir_participante(codigo_participante, codigo_taller):
         raise InscripcionDuplicadaError("El participante ya está inscrito en este taller.")
     if cupos_disponibles(taller) == 0:
         raise CupoAgotadoError("El taller no tiene cupos disponibles.")
-    # Todas las solicitudes del mismo taller escriben el mismo documento para
-    # serializar las comprobaciones de cupo dentro de la transacción.
-    Taller.objects.filter(pk=taller.pk).update(revision=F("revision") + 1)
-    return Inscripcion.objects.create(participante=participante, taller=taller)
+    Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos"))
+    try:
+        return Inscripcion.objects.create(participante=participante, taller=taller)
+    except IntegrityError:
+        raise InscripcionDuplicadaError(
+            "El participante ya está inscrito en este taller."
+        ) from None
