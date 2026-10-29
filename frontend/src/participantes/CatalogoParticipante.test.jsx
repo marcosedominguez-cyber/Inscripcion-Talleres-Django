@@ -359,3 +359,23 @@ test('muestra el error del backend al cancelar sin refrescar', async () => {
   );
   expect(cargarInscripciones).toHaveBeenCalledTimes(1);
 });
+
+
+test('el logo join.a.workshop vuelve al catálogo desde Mis inscripciones', async () => {
+  render(<CatalogoParticipante
+    cargarCatalogo={vi.fn().mockResolvedValue(catalogo(1))}
+    cargarInscripciones={vi.fn().mockResolvedValue(misInscripciones())}
+    usuario={{ nombre_usuario: 'Participante' }} onSesionCaducada={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Inscribirme' });
+  fireEvent.click(screen.getByRole('button', { name: 'Mis inscripciones' }));
+  await screen.findByText('Taller confirmado');
+  const marca = screen.getByRole('link', { name: 'join.a.workshop, ir al catálogo' });
+  expect(marca.querySelector('svg')).toBeTruthy();
+  fireEvent.click(marca);
+  expect(screen.getByRole('heading', { name: 'Próximos talleres' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Mis inscripciones' }));
+  await screen.findByText('Taller confirmado');
+  fireEvent.click(screen.getByRole('button', { name: 'Acciones para Taller confirmado' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Cancelar inscripción' }));
+  expect(screen.getByRole('dialog', { name: 'Cancelar inscripción' })).toBeTruthy();
+});

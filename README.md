@@ -214,3 +214,22 @@ En entornos Windows restringidos, Vite admite `--configLoader runner`.
 
 La migración `0007` agrega el contador y la colección de historial sin alterar
 migraciones históricas. `makemigrations --check` no detecta cambios pendientes.
+
+
+### Integración de diseño con cancelaciones (PR #61)
+
+La interfaz de join.a.workshop conserva la home, el acceso, el panel del instructor
+y el logo de anillos entrelazados. El catálogo incluye las vistas de explorar y
+Mis inscripciones, el diálogo de cancelación y los avisos de bloqueo del PR #61.
+El enlace de marca vuelve al catálogo desde Mis inscripciones.
+
+Después de actualizar, ejecutar `python manage.py migrate` con el entorno y `.env`
+configurados: el PR incorpora `0007_usuario_cancelaciones_consecutivas_cancelacion`.
+No es necesario crear otra migración para integrar el diseño.
+
+La suite React comprueba navegación, creación/edición, espera y cancelaciones.
+`scripts/verificar_atlas.py` también comprueba en una base temporal la promoción de
+la primera persona en espera, la salida de la espera sin liberar plaza confirmada,
+el estado de Mis inscripciones y el bloqueo tras tres cancelaciones.
+Si Atlas rechaza la conexión TLS o no responde, esa comprobación real no se puede
+considerar aprobada; las pruebas unitarias no sustituyen esa verificación.

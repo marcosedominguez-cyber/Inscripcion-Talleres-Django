@@ -268,10 +268,10 @@ export default function CatalogoParticipante({
       <a className="pw-skip" href="#contenido">Ir al contenido</a>
       <header className="pw-header">
         <div className="pw-header-inner">
-          <a className="pw-brand" href="#contenido" aria-label="Talleres, ir al catálogo"
-            onClick={() => setVista('catalogo')}>
-            <span className="pw-brand-icon" aria-hidden="true">T</span>
-            Talleres<span className="pw-brand-dot">.</span>
+          <a className="pw-brand" href="#contenido"
+            onClick={() => setVista('catalogo')} aria-label="join.a.workshop, ir al catálogo">
+            <svg className="jw-join-logo" viewBox="0 0 66 52" fill="none" aria-hidden="true" focusable="false"><path d="M28.26 43.21A18 18 0 1 1 36.79 37.57" stroke="#193c38" strokeWidth="8" /><path d="M37.74 8.79A18 18 0 1 1 29.21 14.43" stroke="#176456" strokeWidth="8" /></svg>
+            join.a.workshop<span className="pw-brand-dot">.</span>
           </a>
           <nav className="pw-nav" aria-label="Navegación del participante">
             <button type="button" aria-current={vista === 'catalogo' ? 'page' : undefined}
@@ -435,7 +435,7 @@ export default function CatalogoParticipante({
           </div>
         </div>
       )}
-      <footer className="pw-footer"><span>Talleres · Espacio del participante</span><span>Aprender nos conecta.</span></footer>
+      <footer className="pw-footer"><span>join.a.workshop · Espacio del participante</span><span>Aprender nos conecta.</span></footer>
     </div>
   );
 }

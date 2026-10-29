@@ -115,6 +115,48 @@ try:
     assert [i.pk for i in consultar_espera(espera_taller)] == ids
     assert servicios.cupos_disponibles(espera_taller) == 0
     print("OK: espera web, último lugar concurrente, rechazo sin cambios, empate y persistencia.")
+    # Integración de espera con las cancelaciones del PR 61.
+    from talleres.models import Usuario, Cancelacion
+    from talleres.api_participantes import inscripcion_participante_api
+    from django.test import RequestFactory
+    from types import SimpleNamespace
+    import json
+    primero = consultar_espera(espera_taller)[0]
+    cancelacion = servicios.cancelar_inscripcion(personas[0].ci, espera_taller.codigo)
+    assert cancelacion.promovido
+    assert Inscripcion.objects.get(pk=primero.pk).estado == Inscripcion.Estado.CONFIRMADA
+    assert servicios.cupos_disponibles(espera_taller) == 0
+    assert len(consultar_espera(espera_taller)) == 1
+    perfil = Usuario.objects.get(pk=primero.participante_id)
+    request = RequestFactory().get("/api/participantes/inscripciones/")
+    request.user = SimpleNamespace(is_authenticated=True, is_active=True, perfil=perfil)
+    respuesta = inscripcion_participante_api(request)
+    assert respuesta.status_code == 200
+    datos = json.loads(respuesta.content)
+    assert next(i for i in datos["inscripciones"]
+                if i["codigo"] == espera_taller.codigo)["estado"] == "confirmada"
+    # Salir de la espera no libera una plaza confirmada ni promueve a nadie.
+    ultima = consultar_espera(espera_taller)[0]
+    ultima_persona = Usuario.objects.get(pk=ultima.participante_id)
+    salida_espera = servicios.cancelar_inscripcion(ultima_persona.ci, espera_taller.codigo)
+    assert not salida_espera.promovido
+    assert servicios.cupos_disponibles(espera_taller) == 0
+    assert consultar_espera(espera_taller) == []
+    # La primera cancelación más otras dos debe bloquear ambos tipos de alta.
+    otro = servicios.registrar_taller("Bloqueo y espera", 4, inicio, inicio + timedelta(days=2))
+    Taller.objects.filter(pk=otro.pk).update(estado_aprobacion=Taller.Aprobacion.APROBADO)
+    for _ in range(2):
+        servicios.inscribir_participante(personas[0].ci, otro.codigo)
+        servicios.cancelar_inscripcion(personas[0].ci, otro.codigo)
+    assert Usuario.objects.get(pk=personas[0].pk).cancelaciones_consecutivas == 3
+    assert Cancelacion.objects.filter(participante=personas[0]).count() == 3
+    esperar_error(servicios.CuentaBloqueadaError, servicios.inscribir_participante,
+                  personas[0].ci, otro.codigo)
+    esperar_error(servicios.CuentaBloqueadaError, servicios.solicitar_espera,
+                  personas[0].ci, espera_taller.codigo)
+    connections.close_all()
+    assert Inscripcion.objects.get(pk=primero.pk).estado == Inscripcion.Estado.CONFIRMADA
+    print("OK: cancelación, promoción FIFO, Mis inscripciones, bloqueo y persistencia integrados.")
     # Procesos distintos: registrar, cerrar y volver a consultar desde el menú.
     assert "CI: 66666666" in menu("1\n66666666\nPersistencia CLI\n7\n")
     salida = menu("6\n3\n5\n7\n")
@@ -123,7 +165,11 @@ try:
 finally:
     if connection.settings_dict["NAME"] != nombre_prueba or not nombre_prueba.startswith("test_cli_"):
         raise RuntimeError("Se impidió limpiar una base distinta de la temporal.")
-    if base_prueba is not None:
-        base_prueba.client.drop_database(nombre_prueba)
-    connections.close_all()
-    print("Base temporal de prueba eliminada; talleres_db no recibió datos de prueba.")
+    try:
+        if base_prueba is not None:
+            base_prueba.client.drop_database(nombre_prueba)
+            print("Base temporal de prueba eliminada; talleres_db no recibió datos de prueba.")
+        else:
+            print("No se llegó a crear la base temporal; talleres_db no recibió datos de prueba.")
+    finally:
+        connections.close_all()
