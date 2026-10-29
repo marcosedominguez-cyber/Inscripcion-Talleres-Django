@@ -23,6 +23,7 @@ from talleres.servicios import (
     CuentaBloqueadaError, CupoAgotadoError, InscripcionDuplicadaError,
     InscripcionNoEncontradaError, ParticipanteNoEncontradoError,
     PlazoCancelacionVencidoError, PlazoInscripcionVencidoError,
+    SuperposicionHorariaError,
     TallerNoAprobadoError, TallerNoEncontradoError, cancelar_inscripcion,
     inscribir_participante, solicitar_espera, ListaEsperaLlenaError,
     TallerConCuposError,
@@ -180,7 +181,7 @@ def inscripcion_participante_api(request, *, espera=False):
         return JsonResponse({"detail": str(error)}, status=409)
     except TallerNoAprobadoError as error:
         return JsonResponse({"detail": str(error)}, status=409)
-    except PlazoInscripcionVencidoError as error:
+    except (PlazoInscripcionVencidoError, SuperposicionHorariaError) as error:
         return JsonResponse({"detail": str(error)}, status=409)
     except (DatabaseError, PyMongoError, FieldError, ImproperlyConfigured):
         return JsonResponse({"detail": "No se pudo completar la inscripción."}, status=503)
@@ -241,7 +242,9 @@ def cancelar_inscripcion_api(request):
 
     mensaje = "Cancelación registrada."
     if cancelacion.promovido:
-        mensaje += " Se promovió a la primera persona en lista de espera."
+        mensaje += " Se promovió a la primera persona habilitada de la lista de espera."
+    elif getattr(cancelacion, "motivo_sin_promocion", None):
+        mensaje += f" No se confirmó a nadie de la lista de espera: {cancelacion.motivo_sin_promocion}"
     if cancelacion.cuenta_bloqueada:
         mensaje += (
             " La cuenta quedó bloqueada para nuevas inscripciones por acumular "

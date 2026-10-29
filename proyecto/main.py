@@ -103,7 +103,9 @@ def ejecutar():
                         f"{cancelacion.estado_anterior}."
                     )
                     if cancelacion.promovido:
-                        print("Se promovió a la primera persona en lista de espera.")
+                        print("Se promovió a la primera persona habilitada de la lista de espera.")
+                    elif getattr(cancelacion, "motivo_sin_promocion", None):
+                        print(f"No se realizó una promoción: {cancelacion.motivo_sin_promocion}")
                     if cancelacion.cuenta_bloqueada:
                         print(
                             "La cuenta quedó bloqueada para nuevas inscripciones "

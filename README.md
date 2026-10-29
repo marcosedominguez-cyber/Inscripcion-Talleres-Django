@@ -7,19 +7,18 @@ Aplicación para publicar talleres con cupos limitados, revisar propuestas de in
 - Registro de cuentas de participante o instructor con nombre de usuario, CI numérica y contraseña; inicio de sesión con CI y contraseña; y cierre de sesión con sesión Django.
 - El registro público no permite asignar rol administrador ni privilegios de `staff`.
 - Catálogo web de talleres aprobados, futuros y con plazas disponibles, visible a participantes autenticados.
-- Inscripción del participante autenticado. El servidor comprueba rol, taller aprobado, fecha límite (un minuto antes del inicio), duplicados, bloqueo de la cuenta y plazas disponibles. La capacidad se controla dentro de una transacción con bloqueo lógico del taller.
-- Cancelación de inscripciones confirmadas o en espera antes del inicio. La plaza liberada se asigna a la primera persona de la lista de espera; el antecedente queda en un historial inmutable con el taller, el estado anterior y la fecha.
+- Inscripción del participante autenticado. El servidor comprueba rol, taller aprobado, fecha límite (un minuto antes del inicio, incluido ese instante), duplicados, bloqueo de la cuenta, superposición de horarios y plazas disponibles. La transacción serializa solicitudes de la misma persona y del mismo taller.
+- Cancelación de inscripciones confirmadas o en espera antes del inicio. La plaza liberada se asigna a la primera persona habilitada de la lista de espera, verificando plazo, bloqueo y superposición; las solicitudes incompatibles permanecen en espera. El antecedente queda en un historial inmutable con el taller, el estado anterior y la fecha.
 - Bloqueo para nuevas inscripciones al acumular tres cancelaciones consecutivas. El contador no se reinicia automáticamente al volver a inscribirse; un administrador puede rehabilitar la cuenta desde Django Admin.
 - Reglas de taller: cupo entre 4 y 40 personas y duración entre 24 horas y 7 días; las fechas se almacenan en UTC y se interpretan/muestran en `America/La_Paz`.
 - Panel de instructor para proponer talleres, ver sus propuestas y plazas, y editar una propuesta propia. Al editar, vuelve a estado pendiente de aprobación.
-- Django Admin (`/admin/`) para personal autorizado con rol administrador. Permite consultar registros y usar acciones para aprobar o rechazar talleres pendientes.
+- Django Admin (`/admin/`) para personal autorizado con rol administrador. Permite consultar registros y usar acciones para aprobar o rechazar talleres pendientes. Las inscripciones y cancelaciones se consultan sin altas, ediciones o borrados directos: esas operaciones usan los servicios compartidos mediante la aplicación o el menú.
 - En la aplicación de terminal hay registro de participantes y talleres, listado de ambos, consulta de inscripciones y alta de inscripción. Las inscripciones del menú también requieren taller aprobado.
 - Persistencia MongoDB mediante el backend Django para MongoDB. Los datos de negocio usan las colecciones `participantes`, `talleres`, `inscripciones`, `cancelaciones` y `contadores`; este último mantiene la secuencia de códigos de talleres.
 
 ### No implementado en el estado inspeccionado
 
 - Notificaciones a las personas promovidas desde la lista de espera.
-- Restricciones de superposición de horarios entre talleres.
 - Penalizaciones por cancelaciones tardías o inasistencias.
 
 ## Arquitectura y tecnologías

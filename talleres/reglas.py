@@ -32,6 +32,11 @@ def inscripcion_abierta(fecha_inicio, ahora):
     return ahora <= limite_inscripcion(fecha_inicio)
 
 
+def horarios_superpuestos(inicio, fin, otro_inicio, otro_fin):
+    """Los extremos adyacentes no comparten tiempo de asistencia."""
+    return inicio < otro_fin and otro_inicio < fin
+
+
 def limite_espera(cupos):
     """Máximo entero que no supera el veinte por ciento."""
     return cupos // 5

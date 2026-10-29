@@ -26,6 +26,7 @@ class ServicioCancelacionTests(SimpleTestCase):
         taller = SimpleNamespace(
             pk="taller-id", codigo="T-001", nombre="Taller de prueba",
             fecha_inicio=inicio or self.ahora + timedelta(days=1),
+            estado_aprobacion=Taller.Aprobacion.APROBADO,
         )
         inscripcion = None
         if activa:
@@ -34,6 +35,7 @@ class ServicioCancelacionTests(SimpleTestCase):
         if promovido == "crear":
             siguiente = SimpleNamespace(
                 estado=Inscripcion.Estado.EN_ESPERA, save=Mock(),
+                participante=SimpleNamespace(pk="espera-id", cancelaciones_consecutivas=0),
             )
         elif promovido is not None:
             siguiente = promovido
@@ -57,6 +59,9 @@ class ServicioCancelacionTests(SimpleTestCase):
             patch.object(servicios.Taller, "objects", talleres),
             patch.object(servicios.Inscripcion, "objects", inscripciones),
             patch.object(servicios.Cancelacion, "objects", cancelaciones_manager),
+            patch.object(servicios, "consultar_espera", return_value=[siguiente] if siguiente else []),
+            patch.object(servicios, "buscar_superposicion", return_value=None),
+            patch.object(servicios, "_serializar_inscripciones"),
             patch.object(servicios.timezone, "now", return_value=ahora or self.ahora),
         ):
             resultado = servicios.cancelar_inscripcion("12345678", "T-001")

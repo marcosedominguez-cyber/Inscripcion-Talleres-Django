@@ -9,11 +9,12 @@ from django.db.models import F
 from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
 
-from talleres.consultas import cupos_disponibles, consultar_espera
+from talleres.consultas import buscar_superposicion, cupos_disponibles, consultar_espera
 from talleres.models import Cancelacion, Contador, Inscripcion, Usuario, Taller
 from talleres.reglas import (
     LIMITE_CANCELACIONES_CONSECUTIVAS, cancelacion_abierta,
     cuenta_bloqueada_para_inscripciones, inscripcion_abierta, limite_espera,
+    limite_inscripcion,
 )
 
 
@@ -51,6 +52,10 @@ class TallerNoAprobadoError(InscripcionError):
 
 class PlazoInscripcionVencidoError(InscripcionError):
     """El plazo de inscripción ya venció."""
+
+
+class SuperposicionHorariaError(InscripcionError):
+    """La persona ya tiene una confirmación en un horario incompatible."""
 
 
 class CuentaBloqueadaError(InscripcionError):
@@ -188,6 +193,41 @@ def solicitar_espera(ci, codigo_taller):
     return _registrar_solicitud(ci, codigo_taller, espera=True)
 
 
+def _validar_plazo(taller, ahora):
+    if not inscripcion_abierta(taller.fecha_inicio, ahora):
+        limite = timezone.localtime(limite_inscripcion(taller.fecha_inicio))
+        raise PlazoInscripcionVencidoError(
+            "Fuera de plazo: la inscripción cierra un minuto antes del inicio. "
+            f"El límite fue el {limite:%d/%m/%Y a las %H:%M:%S} "
+            f"({timezone.get_current_timezone_name()})."
+        )
+
+
+def _validar_superposicion(participante, taller):
+    otro = buscar_superposicion(participante, taller)
+    if otro is not None:
+        inicio = timezone.localtime(otro.fecha_inicio)
+        fin = timezone.localtime(otro.fecha_fin)
+        raise SuperposicionHorariaError(
+            "Superposición de horarios: ya tienes una inscripción confirmada "
+            f"en {otro.codigo} — {otro.nombre} "
+            f"({inicio:%d/%m/%Y %H:%M} a {fin:%d/%m/%Y %H:%M}, "
+            f"{timezone.get_current_timezone_name()})."
+        )
+
+
+def _serializar_inscripciones(participante):
+    # Igual que con cupos: dos escrituras reales dentro de la transacción.
+    # No cambia el total de cancelaciones. Permite detectar solicitudes
+    # simultáneas de la misma persona en talleres distintos y reintentarlas.
+    Usuario.objects.filter(pk=participante.pk).update(
+        cancelaciones_consecutivas=F("cancelaciones_consecutivas") + 1
+    )
+    Usuario.objects.filter(pk=participante.pk).update(
+        cancelaciones_consecutivas=F("cancelaciones_consecutivas") - 1
+    )
+
+
 @transaccion_con_reintentos
 def _registrar_solicitud(ci, codigo_taller, *, espera):
     try:
@@ -214,12 +254,10 @@ def _registrar_solicitud(ci, codigo_taller, *, espera):
         ) from None
     if taller.estado_aprobacion != Taller.Aprobacion.APROBADO:
         raise TallerNoAprobadoError("El taller todavía no está aprobado para inscripciones.")
-    if not inscripcion_abierta(taller.fecha_inicio, timezone.now()):
-        raise PlazoInscripcionVencidoError(
-            "La inscripción cierra un minuto antes del inicio del taller."
-        )
+    _validar_plazo(taller, timezone.now())
     if Inscripcion.objects.filter(participante=participante, taller=taller).exists():
         raise InscripcionDuplicadaError("El participante ya está inscrito en este taller.")
+    _validar_superposicion(participante, taller)
     disponibles = cupos_disponibles(taller)
     if espera:
         if disponibles:
@@ -228,6 +266,7 @@ def _registrar_solicitud(ci, codigo_taller, *, espera):
             raise ListaEsperaLlenaError("La lista de espera está llena.")
     elif disponibles == 0:
         raise CupoAgotadoError("El taller no tiene cupos disponibles.")
+    _serializar_inscripciones(participante)
     # Escritura real compartida: MongoDB debe detectar conflictos entre
     # solicitudes y ediciones del mismo taller. La transacción revierte ambos pasos.
     Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") + 1)
@@ -247,6 +286,31 @@ def _registrar_solicitud(ci, codigo_taller, *, espera):
         raise InscripcionDuplicadaError(
             "El participante ya está inscrito en este taller."
         ) from None
+
+
+def _promover_desde_espera(taller):
+    if taller.estado_aprobacion != Taller.Aprobacion.APROBADO:
+        return None, "El taller no está aprobado para confirmar inscripciones."
+    try:
+        _validar_plazo(taller, timezone.now())
+    except PlazoInscripcionVencidoError as error:
+        return None, str(error)
+    motivo = None
+    for solicitud in consultar_espera(taller):
+        participante = solicitud.participante
+        if cuenta_bloqueada_para_inscripciones(participante.cancelaciones_consecutivas):
+            motivo = "Las solicitudes en espera no cumplen las reglas de inscripción."
+            continue
+        try:
+            _validar_superposicion(participante, taller)
+        except SuperposicionHorariaError:
+            motivo = "Las solicitudes en espera tienen horarios incompatibles."
+            continue
+        _serializar_inscripciones(participante)
+        solicitud.estado = Inscripcion.Estado.CONFIRMADA
+        solicitud.save(update_fields=["estado"])
+        return solicitud, None
+    return None, motivo
 
 
 @transaccion_con_reintentos
@@ -305,15 +369,12 @@ def cancelar_inscripcion(ci, codigo_taller):
     inscripcion.delete()
 
     promovido = None
+    motivo_sin_promocion = None
     if estado_anterior == Inscripcion.Estado.CONFIRMADA:
-        promovido = Inscripcion.objects.filter(
-            taller=taller, estado=Inscripcion.Estado.EN_ESPERA,
-        ).order_by("fecha_solicitud", "id").first()
-        if promovido is not None:
-            promovido.estado = Inscripcion.Estado.CONFIRMADA
-            promovido.save(update_fields=["estado"])
+        promovido, motivo_sin_promocion = _promover_desde_espera(taller)
 
     cancelacion.promovido = promovido is not None
+    cancelacion.motivo_sin_promocion = motivo_sin_promocion
     cancelacion.cancelaciones_consecutivas = total_cancelaciones
     cancelacion.cuenta_bloqueada = cuenta_bloqueada_para_inscripciones(
         total_cancelaciones
