@@ -126,8 +126,8 @@ El menú solicita participantes, talleres, inscripciones y listados; sus fechas 
 
 ## Pruebas y validación
 
-La suite tiene **90 casos ejecutables**: **72 unitarios** (60 Python + 12 React),
-**14 de integración** con MongoDB y **4 end to end** con navegador real.
+La suite tiene **108 casos ejecutables**: **81 unitarios** (69 Python + 12 React),
+**23 de integración** con MongoDB y **4 end to end** con navegador real.
 Las filas parametrizadas se cuentan como pruebas individuales.
 
 Instalación de dependencias de desarrollo:
@@ -141,10 +141,10 @@ python -m playwright install chromium
 Desde la raíz:
 
 ```bash
-# Las 72 unitarias; no requieren base de datos ni cargan el .env de la app.
+# Las 81 unitarias; no requieren base de datos ni cargan el .env de la app.
 python scripts/ejecutar_pruebas.py
 
-# Las 90; mongod debe estar instalado. Inicia y elimina un replica set local temporal.
+# Las 108; mongod debe estar instalado. Inicia y elimina un replica set local temporal.
 python scripts/ejecutar_pruebas.py --completa
 ```
 
@@ -155,12 +155,12 @@ ni se importa la configuración de producción. La cuenta necesita permisos sobr
 esa base de pruebas. La validación local no certifica el acceso al clúster Atlas.
 
 El workflow de CI instala `requirements-ci.txt`, prepara Chromium y un MongoDB
-local temporal y ejecuta las **90**, sin omitir integración ni navegador. Los
+local temporal y ejecuta las **108**, sin omitir integración ni navegador. Los
 resultados JUnit y el inventario quedan en `evidencias/`. Una prueba omitida,
 un fallo o una cantidad distinta a la esperada detiene el ejecutor.
 
-Con `python -m pytest -q` se ejecutan las 60 unitarias Python y se omiten las 18
-que necesitan MongoDB/navegador. Esa ejecución parcial no acredita las 90.
+Con `python -m pytest -q` se ejecutan las 69 unitarias Python y se omiten las 27
+que necesitan MongoDB/navegador. Esa ejecución parcial no acredita las 108.
 Ver la [matriz y los comandos completos](docs/pruebas.md).
 
 ## Estructura principal
