@@ -203,9 +203,11 @@ El catálogo devuelve `mi_estado`, `posicion_espera`, `limite_espera` y `lugares
 - Una inscripción activa (confirmada o en espera) puede cancelarse mientras el taller no haya comenzado.
 - La cancelación elimina la inscripción activa y conserva un registro en la colección `cancelaciones` con `codigo_taller`, `nombre_taller`, `estado_anterior` y `fecha_cancelacion`. La re-inscripción posterior crea una solicitud nueva y no borra el antecedente.
 - Si se cancela una inscripción confirmada, la primera persona en espera pasa a confirmada respetando `fecha_solicitud` e `id`; no se crea otro registro ni se altera el cupo total.
-- Cada cancelación incrementa `Usuario.cancelaciones_consecutivas`. Al llegar a tres, la cuenta no puede crear nuevas inscripciones ni solicitudes de espera. El contador solo se reinicia mediante la acción administrativa «Rehabilitar inscripciones».
+- Cada cancelación incrementa `Usuario.cancelaciones_consecutivas`. Al llegar a tres se abre un episodio automático en `bloqueos` y la cuenta no puede crear nuevas inscripciones ni solicitudes de espera.
+- El panel administrativo permite bloquear participantes con un motivo controlado y rehabilitarlos desde la ficha individual o mediante las acciones masivas. La rehabilitación registra fecha y administrador en el mismo episodio, conserva el historial y solo reinicia el contador cuando este alcanzó el límite, para iniciar un ciclo disciplinario nuevo.
 - API: `POST /api/participantes/inscripciones/cancelar/` con `codigo_taller` e identidad desde la sesión. `GET /api/participantes/inscripciones/` devuelve también `cancelaciones`, `cancelaciones_consecutivas`, `limite_cancelaciones` e `inscripciones_bloqueadas`.
-- La migración `0007_usuario_cancelaciones_consecutivas_cancelacion.py` agrega el contador y la colección de historial. Los documentos de participantes anteriores al cambio se interpretan con contador cero.
+- La migración `0007_usuario_cancelaciones_consecutivas_cancelacion.py` agrega el contador y la colección de historial. La migración `0008_usuario_bloqueado_bloqueo.py` agrega `Usuario.bloqueado`, crea `bloqueos` e inicializa el estado de bloqueo de los participantes existentes sin crear historial sintético ni alterar cancelaciones.
+- La migración se aplica con `python manage.py migrate` únicamente después de verificar la conexión y las transacciones del entorno. Las pruebas de integración de MongoDB se omiten salvo que se use `--ds=config.settings_test_mongodb_local` contra una instancia local desechable.
 
 Pruebas: `python -m pytest -q`, `npm test` desde frontend, y
 `python scripts/verificar_atlas.py` para verificación real en una base temporal.

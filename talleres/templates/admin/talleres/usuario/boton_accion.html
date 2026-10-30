@@ -1,0 +1,13 @@
+{% if original.rol == "participante" %}
+    <li>
+        {% if original.bloqueado %}
+            <a href="{% url 'admin:talleres_usuario_rehabilitar' original.pk %}">
+                Rehabilitar participante
+            </a>
+        {% else %}
+            <a href="{% url 'admin:talleres_usuario_bloquear' original.pk %}">
+                Bloquear participante
+            </a>
+        {% endif %}
+    </li>
+{% endif %}

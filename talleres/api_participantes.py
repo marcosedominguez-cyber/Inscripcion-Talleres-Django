@@ -16,16 +16,14 @@ from talleres.consultas import (
     listar_inscripciones_participante, listar_talleres_proximos, resumen_espera,
 )
 from talleres.models import Inscripcion, Usuario
-from talleres.reglas import (
-    LIMITE_CANCELACIONES_CONSECUTIVAS, cuenta_bloqueada_para_inscripciones,
-)
+from talleres.reglas import LIMITE_CANCELACIONES_CONSECUTIVAS
 from talleres.servicios import (
     CuentaBloqueadaError, CupoAgotadoError, InscripcionDuplicadaError,
     InscripcionNoEncontradaError, ParticipanteNoEncontradoError,
     PlazoCancelacionVencidoError, PlazoInscripcionVencidoError,
     TallerNoAprobadoError, TallerNoEncontradoError, cancelar_inscripcion,
-    inscribir_participante, solicitar_espera, ListaEsperaLlenaError,
-    TallerConCuposError,
+    esta_bloqueado, inscribir_participante, solicitar_espera,
+    ListaEsperaLlenaError, TallerConCuposError,
 )
 
 
@@ -149,7 +147,7 @@ def inscripcion_participante_api(request, *, espera=False):
             "cancelaciones": cancelaciones,
             "cancelaciones_consecutivas": total,
             "limite_cancelaciones": LIMITE_CANCELACIONES_CONSECUTIVAS,
-            "inscripciones_bloqueadas": cuenta_bloqueada_para_inscripciones(total),
+            "inscripciones_bloqueadas": esta_bloqueado(perfil),
             "zona_horaria": timezone.get_current_timezone_name(),
         })
 

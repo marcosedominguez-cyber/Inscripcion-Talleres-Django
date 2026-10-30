@@ -1,0 +1,41 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p>{{ explicacion }}</p>
+
+<form method="post"{% if form_action %} action="{{ form_action }}"{% endif %}>
+    {% csrf_token %}
+    {% if accion_masiva %}
+        <input type="hidden" name="action" value="bloquear_participantes">
+        <input type="hidden" name="select_across" value="0">
+        <input type="hidden" name="confirmar_bloqueo" value="1">
+        {% for participante in participantes %}
+            <input type="hidden" name="_selected_action" value="{{ participante.pk }}">
+        {% endfor %}
+    {% endif %}
+
+    <div class="form-row">
+        <label for="motivo">Motivo del bloqueo:</label>
+        <select name="motivo" id="motivo" required>
+            <option value="">Selecciona un motivo</option>
+            {% for valor, etiqueta in motivos %}
+                <option value="{{ valor }}"{% if valor == motivo_seleccionado %} selected{% endif %}>{{ etiqueta }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <h2>{% if accion_masiva %}Participantes seleccionados{% else %}Participante{% endif %}</h2>
+    <ul>
+        {% for participante in participantes %}
+            <li>{{ participante }} — rol: {{ participante.get_rol_display }}</li>
+        {% empty %}
+            <li>No hay participantes seleccionados.</li>
+        {% endfor %}
+    </ul>
+
+    <div class="submit-row">
+        <input type="submit" value="Confirmar bloqueo" class="default">
+        <a href="{{ cancel_url }}" class="button cancel-link">Cancelar</a>
+    </div>
+</form>
+{% endblock %}

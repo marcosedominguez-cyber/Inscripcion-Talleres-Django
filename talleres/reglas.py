@@ -37,9 +37,16 @@ def limite_espera(cupos):
     return cupos // 5
 
 
-def cuenta_bloqueada_para_inscripciones(cancelaciones_consecutivas):
-    """El bloqueo se deriva del contador para no guardar estados contradictorios."""
-    return (cancelaciones_consecutivas or 0) >= LIMITE_CANCELACIONES_CONSECUTIVAS
+def cuenta_bloqueada_para_inscripciones(cancelaciones_consecutivas, *, bloqueado=False):
+    """Combina el estado persistido con la regla histórica del contador.
+
+    El campo ``bloqueado`` es el estado efectivo. El contador se conserva como
+    respaldo para documentos anteriores a la migración que aún no tengan el
+    campo y para que la regla automática siga funcionando durante el relleno.
+    """
+    return bool(bloqueado) or (
+        (cancelaciones_consecutivas or 0) >= LIMITE_CANCELACIONES_CONSECUTIVAS
+    )
 
 
 def cancelacion_abierta(fecha_inicio, ahora):
