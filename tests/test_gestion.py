@@ -110,6 +110,7 @@ class GestionInstructorTests(SimpleTestCase):
         request = self.solicitud("patch", "/api/gestion/talleres/T-OWN/", {"nombre": "Nuevo"})
         with patch.object(Taller, "objects", manager), \
              patch.object(taller_services.Inscripcion, "objects", inscripciones), \
+             patch("talleres.servicios._notificar_edicion_taller"), \
              patch("talleres.servicios.atomic", return_value=nullcontext()), \
              patch.object(api_gestion, "_serializar", return_value={"codigo": "T-OWN"}):
             response = api_gestion.taller_instructor(request, "T-OWN")
@@ -367,3 +368,46 @@ class ConsultaGestionEsperaTests(SimpleTestCase):
                 perfil=SimpleNamespace(rol=Usuario.Rol.PARTICIPANTE)), 403)]:
             response = api_gestion.espera_instructor(self.solicitud("get", "/", user=user), "T-1")
             self.assertEqual(response.status_code, esperado)
+
+
+class AdminSinEliminacionesTests(SimpleTestCase):
+    def setUp(self):
+        self.request = RequestFactory().get('/admin/')
+        self.request.user = SimpleNamespace(
+            is_active=True, is_staff=True, is_superuser=True,
+            perfil=SimpleNamespace(rol=Usuario.Rol.ADMINISTRADOR),
+        )
+
+    def test_ni_superusuario_puede_eliminar_y_se_conserva_edicion(self):
+        for modelo in (Usuario, Taller, Inscripcion):
+            with self.subTest(modelo=modelo.__name__):
+                administrador = admin_site._registry[modelo]
+                self.assertFalse(administrador.has_delete_permission(self.request))
+                self.assertFalse(administrador.has_delete_permission(self.request, modelo()))
+                self.assertTrue(administrador.has_view_permission(self.request))
+                self.assertEqual(administrador.has_change_permission(self.request), modelo is not Inscripcion)
+
+    def test_acciones_masivas_excluyen_borrado_y_conservan_las_del_negocio(self):
+        for modelo in (Usuario, Taller, Inscripcion):
+            with self.subTest(modelo=modelo.__name__):
+                acciones = admin_site._registry[modelo].get_actions(self.request)
+                self.assertNotIn('delete_selected', acciones)
+        self.assertIn('rehabilitar_participantes', admin_site._registry[Usuario].get_actions(self.request))
+        self.assertIn('aprobar_seleccionados', admin_site._registry[Taller].get_actions(self.request))
+        self.assertIn('rechazar_seleccionados', admin_site._registry[Taller].get_actions(self.request))
+
+    def test_url_de_eliminacion_rechaza_get_y_post_sin_borrar(self):
+        from django.core.exceptions import PermissionDenied
+        for modelo in (Usuario, Taller, Inscripcion):
+            administrador = admin_site._registry[modelo]
+            for metodo in ('get', 'post'):
+                with self.subTest(modelo=modelo.__name__, metodo=metodo):
+                    request = getattr(RequestFactory(), metodo)('/admin/talleres/objeto/1/delete/')
+                    request.user = self.request.user
+                    objeto = Mock()
+                    with patch.object(administrador, 'get_object', return_value=objeto), \
+                         patch.object(administrador, 'delete_model') as borrar:
+                        with self.assertRaises(PermissionDenied):
+                            administrador._delete_view(request, '1', None)
+                    borrar.assert_not_called()
+                    objeto.delete.assert_not_called()

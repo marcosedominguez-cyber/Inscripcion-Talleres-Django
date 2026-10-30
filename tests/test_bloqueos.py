@@ -81,6 +81,7 @@ class ServicioBloqueoTests(SimpleTestCase):
         bloqueos.create.return_value = creado
         usuarios = Mock()
         with (
+            patch.object(servicios, "_notificar"),
             patch.object(servicios, "atomic", return_value=nullcontext()),
             patch.object(servicios.Bloqueo, "objects", bloqueos),
             patch.object(servicios.Usuario, "objects", usuarios),
@@ -115,6 +116,7 @@ class ServicioBloqueoTests(SimpleTestCase):
             SimpleNamespace(fecha_desbloqueo=None)
         )
         with (
+            patch.object(servicios, "_notificar"),
             patch.object(servicios, "atomic", return_value=nullcontext()),
             patch.object(servicios.Bloqueo, "objects", bloqueos),
             patch.object(servicios.Usuario, "objects") as usuarios,
@@ -159,6 +161,7 @@ class ServicioBloqueoTests(SimpleTestCase):
         bloqueos.filter.return_value.order_by.return_value.first.return_value = abierto
         usuarios = Mock()
         with (
+            patch.object(servicios, "_notificar"),
             patch.object(servicios, "atomic", return_value=nullcontext()),
             patch.object(servicios.Bloqueo, "objects", bloqueos),
             patch.object(servicios.Usuario, "objects", usuarios),
@@ -190,6 +193,7 @@ class ServicioBloqueoTests(SimpleTestCase):
         bloqueos.filter.return_value.order_by.return_value.first.return_value = abierto
         usuarios = Mock()
         with (
+            patch.object(servicios, "_notificar"),
             patch.object(servicios, "atomic", return_value=nullcontext()),
             patch.object(servicios.Bloqueo, "objects", bloqueos),
             patch.object(servicios.Usuario, "objects", usuarios),
@@ -199,7 +203,8 @@ class ServicioBloqueoTests(SimpleTestCase):
         self.assertEqual(persona.cancelaciones_consecutivas, 1)
 
     def test_no_rehabilita_a_quien_no_esta_bloqueado(self):
-        with patch.object(servicios, "atomic", return_value=nullcontext()), \
+        with patch.object(servicios, "_notificar"), \
+            patch.object(servicios, "atomic", return_value=nullcontext()), \
              patch.object(servicios.Bloqueo, "objects") as bloqueos, \
              patch.object(servicios.Usuario, "objects") as usuarios:
             bloqueos.filter.return_value.order_by.return_value.first.return_value = None

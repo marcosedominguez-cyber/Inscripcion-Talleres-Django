@@ -15,7 +15,8 @@ from talleres.consultas import (
     cupos_disponibles, listar_cancelaciones_participante,
     listar_inscripciones_participante, listar_talleres_proximos, resumen_espera,
 )
-from talleres.models import Inscripcion, Usuario
+from talleres.models import Inscripcion, Notificacion, Usuario
+from bson import ObjectId
 from talleres.reglas import LIMITE_CANCELACIONES_CONSECUTIVAS
 from talleres.servicios import (
     CuentaBloqueadaError, CupoAgotadoError, InscripcionDuplicadaError,
@@ -255,3 +256,52 @@ def cancelar_inscripcion_api(request):
         "cancelaciones_consecutivas": cancelacion.cancelaciones_consecutivas,
         "inscripciones_bloqueadas": cancelacion.cuenta_bloqueada,
     })
+
+
+@require_safe
+@never_cache
+def notificaciones_api(request):
+    perfil, error = _participante(request, "Esta sección es exclusiva para participantes.")
+    if error:
+        return error
+    anteriores = request.GET.get("antes")
+    if anteriores and not ObjectId.is_valid(anteriores):
+        return JsonResponse({"detail": "El cursor no es válido."}, status=400)
+    try:
+        bandeja = Notificacion.objects.filter(participante=perfil)
+        no_leidas = bandeja.filter(leida=False).count()
+        if anteriores:
+            anterior = bandeja.filter(pk=ObjectId(anteriores)).first()
+            if anterior is None:
+                return JsonResponse({"detail": "Notificación no encontrada."}, status=404)
+            from django.db.models import Q
+            bandeja = bandeja.filter(Q(fecha__lt=anterior.fecha) |
+                Q(fecha=anterior.fecha, pk__lt=anterior.pk))
+        filas = list(bandeja.select_related("taller").order_by("-fecha", "-id")[:21])
+        pagina = filas[:20]
+        return JsonResponse({"notificaciones": [
+            {"id": str(n.pk), "tipo": n.tipo, "titulo": n.titulo,
+             "mensaje": n.mensaje, "fecha": n.fecha, "leida": n.leida,
+             "codigo_taller": n.taller.codigo if n.taller_id else None}
+            for n in pagina], "no_leidas": no_leidas,
+            "siguiente": str(pagina[-1].pk) if len(filas) > 20 else None})
+    except (DatabaseError, PyMongoError):
+        return JsonResponse({"detail": "No se pudieron consultar las notificaciones."}, status=503)
+
+
+@require_POST
+@never_cache
+def leer_notificacion_api(request, identificador):
+    perfil, error = _participante(request, "Esta operación es exclusiva para participantes.")
+    if error:
+        return error
+    if not ObjectId.is_valid(identificador):
+        return JsonResponse({"detail": "Notificación no encontrada."}, status=404)
+    try:
+        aviso = Notificacion.objects.filter(pk=ObjectId(identificador), participante=perfil)
+        if not aviso.exists():
+            return JsonResponse({"detail": "Notificación no encontrada."}, status=404)
+        aviso.filter(leida=False).update(leida=True)
+        return JsonResponse({"mensaje": "Notificación leída."})
+    except (DatabaseError, PyMongoError):
+        return JsonResponse({"detail": "No se pudo marcar la notificación."}, status=503)

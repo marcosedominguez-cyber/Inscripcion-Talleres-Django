@@ -157,6 +157,52 @@ try:
     connections.close_all()
     assert Inscripcion.objects.get(pk=primero.pk).estado == Inscripcion.Estado.CONFIRMADA
     print("OK: cancelación, promoción FIFO, Mis inscripciones, bloqueo y persistencia integrados.")
+    # Notificaciones: persistencia real, entrega idempotente y rollback conjunto.
+    from talleres.models import Notificacion, Bloqueo
+    from talleres.api_participantes import notificaciones_api, leer_notificacion_api
+    from unittest.mock import patch
+    from django.contrib.auth import get_user_model
+    assert Notificacion.objects.filter(participante_id=primero.participante_id, tipo="promocion").count() == 1
+    assert Notificacion.objects.filter(participante=personas[0], tipo="bloqueo").count() == 1
+    servicios.solicitar_espera(rechazada.ci, espera_taller.codigo)
+    espera_taller.refresh_from_db()
+    servicios.actualizar_taller(espera_taller, {"descripcion": "Contenido actualizado"}, reenviar_revision=False)
+    activos = set(Inscripcion.objects.filter(taller=espera_taller).values_list("participante_id", flat=True))
+    avisos_edicion = list(Notificacion.objects.filter(taller=espera_taller, tipo="edicion_taller"))
+    assert {n.participante_id for n in avisos_edicion} == activos
+    assert len(avisos_edicion) == len(activos)
+    servicios.actualizar_taller(espera_taller, {"descripcion": "Contenido actualizado"}, reenviar_revision=False)
+    assert Notificacion.objects.filter(taller=espera_taller, tipo="edicion_taller").count() == len(activos)
+    antes_ins = list(Inscripcion.objects.filter(taller=espera_taller).order_by("id").values())
+    antes_can = Cancelacion.objects.count()
+    antes_not = Notificacion.objects.count()
+    with patch.object(servicios, "_notificar", side_effect=RuntimeError("Entrega simulada fallida")):
+        esperar_error(RuntimeError, servicios.cancelar_inscripcion, personas[1].ci, espera_taller.codigo)
+    assert list(Inscripcion.objects.filter(taller=espera_taller).order_by("id").values()) == antes_ins
+    assert Cancelacion.objects.count() == antes_can
+    assert Notificacion.objects.count() == antes_not
+    assert Usuario.objects.get(pk=personas[1].pk).cancelaciones_consecutivas == 0
+    servicios.cancelar_inscripcion(personas[1].ci, espera_taller.codigo)
+    promovido_aviso = Notificacion.objects.get(participante=rechazada, tipo="promocion")
+    servicios._notificar(rechazada, "promocion", "Duplicada", "Duplicada",
+                         promovido_aviso.clave_evento, taller=espera_taller)
+    assert Notificacion.objects.filter(participante=rechazada, tipo="promocion").count() == 1
+    administrador = get_user_model().objects.create(username="admin_notificaciones", is_staff=True)
+    manual = servicios.registrar_participante("Bloqueo manual", "90123456")
+    servicios.bloquear_participante(manual, Bloqueo.Motivo.CONDUCTA_INAPROPIADA, administrador)
+    assert "Conducta inapropiada" in Notificacion.objects.get(participante=manual).mensaje
+    request = RequestFactory().get("/api/participantes/notificaciones/")
+    request.user = SimpleNamespace(is_authenticated=True, is_active=True, perfil=rechazada)
+    response = notificaciones_api(request)
+    assert response.status_code == 200
+    assert json.loads(response.content)["no_leidas"] == 2
+    lectura = RequestFactory().post("/api/participantes/notificaciones/leer/")
+    lectura.user = request.user
+    assert leer_notificacion_api(lectura, str(promovido_aviso.pk)).status_code == 200
+    connections.close_all()
+    assert Notificacion.objects.get(pk=promovido_aviso.pk).leida
+    assert json.loads(notificaciones_api(request).content)["no_leidas"] == 1
+    print("OK: notificaciones de edición, promoción y bloqueo; idempotencia, lectura y rollback real.")
     # Procesos distintos: registrar, cerrar y volver a consultar desde el menú.
     assert "CI: 66666666" in menu("1\n66666666\nPersistencia CLI\n7\n")
     salida = menu("6\n3\n5\n7\n")

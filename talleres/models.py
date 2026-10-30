@@ -276,3 +276,28 @@ class Contador(models.Model):
 
     class Meta:
         db_table = "contadores"
+
+
+class Notificacion(models.Model):
+    class Tipo(models.TextChoices):
+        EDICION_TALLER = "edicion_taller", "Cambios en tu taller"
+        PROMOCION = "promocion", "Plaza confirmada"
+        BLOQUEO = "bloqueo", "Bloqueo de cuenta"
+
+    id = ObjectIdAutoField(primary_key=True)
+    participante = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name="notificaciones")
+    taller = models.ForeignKey(Taller, on_delete=models.PROTECT, null=True, blank=True)
+    tipo = models.CharField(max_length=24, choices=Tipo.choices)
+    titulo = models.CharField(max_length=200)
+    mensaje = models.TextField()
+    clave_evento = models.CharField(max_length=120)
+    fecha = models.DateTimeField(default=timezone.now)
+    leida = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "notificaciones"
+        ordering = ["-fecha", "-id"]
+        constraints = [models.UniqueConstraint(
+            fields=["participante", "clave_evento"], name="notificacion_evento_unico",
+        )]
+        indexes = [models.Index(fields=["participante", "leida", "fecha"], name="notificaciones_bandeja")]

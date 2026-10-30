@@ -283,6 +283,9 @@ class AuditoriaAccionesTests(SimpleTestCase):
     def setUp(self):
         self.admin = TallerAdmin(Taller, admin_site)
         self.request = SimpleNamespace(user=SimpleNamespace(pk="admin-id"))
+        from contextlib import nullcontext
+        self.salida_notificacion = self.enterContext(patch("talleres.admin._notificar_edicion_taller"))
+        self.enterContext(patch("talleres.servicios.atomic", return_value=nullcontext()))
 
     def test_aprobar_registra_solo_el_cambio_real(self):
         pendiente = crear_taller()
@@ -376,3 +379,31 @@ class AuditoriaAccionesTests(SimpleTestCase):
         log_change.assert_not_called()
         self.assertEqual(queryset.filtros, [])
         self.assertEqual(queryset.actualizaciones, [])
+
+
+class NotificacionesAdminTests(SimpleTestCase):
+    def test_editar_desde_admin_utiliza_servicio_sin_reenviar_revision(self):
+        from types import SimpleNamespace
+        modelo_admin = TallerAdmin(Taller, admin_site)
+        taller = crear_taller()
+        formulario = SimpleNamespace(changed_data=["nombre"])
+        taller.nombre = "Nuevo título"
+        anterior = crear_taller()
+        with patch.object(Taller, "objects") as gestor, \
+             patch("talleres.admin.actualizar_taller") as actualizar:
+            gestor.get.return_value = anterior
+            modelo_admin.save_model(None, taller, formulario, True)
+        actualizar.assert_called_once_with(anterior, {"nombre": "Nuevo título"}, reenviar_revision=False)
+
+    def test_aprobacion_masiva_notifica_solo_el_cambio_real(self):
+        from contextlib import nullcontext
+        modelo_admin = TallerAdmin(Taller, admin_site)
+        pendiente = crear_taller()
+        aprobado = crear_taller(Taller.Aprobacion.APROBADO)
+        queryset = QuerysetFalso([pendiente, aprobado], [1])
+        with patch("talleres.servicios.atomic", return_value=nullcontext()), \
+             patch("talleres.admin._notificar_edicion_taller") as enviar, \
+             patch.object(modelo_admin, "log_change"), \
+             patch.object(modelo_admin, "message_user"):
+            modelo_admin.aprobar_seleccionados(None, queryset)
+        enviar.assert_called_once_with(pendiente, {"estado_aprobacion": ("pendiente", "aprobado")})

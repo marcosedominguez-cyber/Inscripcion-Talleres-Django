@@ -1,9 +1,119 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   cancelarInscripcion, inscribirEnTaller, obtenerCatalogo, obtenerMisInscripciones,
-  solicitarEspera,
+  solicitarEspera, obtenerNotificaciones, marcarNotificacionLeida,
 } from './api.js';
 import './catalogo.css';
+
+function Notificaciones({ onSesionCaducada, onNovedades }) {
+  const [abierto, setAbierto] = useState(false);
+  const [nuevoAviso, setNuevoAviso] = useState(null);
+  const [bandeja, setBandeja] = useState({ notificaciones: [], no_leidas: 0, siguiente: null });
+  const [anteriores, setAnteriores] = useState([]);
+  const [cursor, setCursor] = useState(null);
+  const [error, setError] = useState('');
+  const [ocupado, setOcupado] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const ultimo = useRef(null);
+  const novedades = useRef(onNovedades);
+  novedades.current = onNovedades;
+  useEffect(() => {
+    const controller = new AbortController();
+    let consultando = false;
+    async function actualizar() {
+      if (consultando || controller.signal.aborted || document.visibilityState === 'hidden') return;
+      consultando = true;
+      try {
+        const datos = await obtenerNotificaciones({ signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (!Array.isArray(datos.notificaciones) || !Number.isInteger(datos.no_leidas)) throw new Error('Respuesta inválida de notificaciones.');
+        setBandeja(datos);
+        setError('');
+        const id = datos.notificaciones[0]?.id || '';
+        if (ultimo.current !== null && ultimo.current !== id) {
+          novedades.current?.();
+          if (datos.notificaciones[0]) setNuevoAviso(datos.notificaciones[0]);
+        }
+        ultimo.current = id;
+      } catch (fallo) {
+        if (controller.signal.aborted) return;
+        if (fallo.status === 401) onSesionCaducada();
+        else setError('No pudimos actualizar tus notificaciones. Volveremos a intentarlo.');
+      } finally { consultando = false; if (!controller.signal.aborted) setCargando(false); }
+    }
+    actualizar();
+    const timer = window.setInterval(actualizar, 15000);
+    window.addEventListener('focus', actualizar);
+    document.addEventListener('visibilitychange', actualizar);
+    return () => {
+      controller.abort(); window.clearInterval(timer);
+      window.removeEventListener('focus', actualizar);
+      document.removeEventListener('visibilitychange', actualizar);
+    };
+  }, [onSesionCaducada]);
+  useEffect(() => {
+    if (!abierto) return undefined;
+    const cerrar = (e) => { if (e.key === 'Escape') setAbierto(false); };
+    window.addEventListener('keydown', cerrar);
+    return () => window.removeEventListener('keydown', cerrar);
+  }, [abierto]);
+  useEffect(() => {
+    if (!nuevoAviso) return undefined;
+    const timer = window.setTimeout(() => setNuevoAviso(null), 10000);
+    return () => window.clearTimeout(timer);
+  }, [nuevoAviso]);
+  async function leer(id) {
+    if (ocupado) return;
+    setOcupado(id);
+    try {
+      await marcarNotificacionLeida(id);
+      setBandeja((actual) => ({ ...actual, no_leidas: Math.max(0, actual.no_leidas - 1),
+        notificaciones: actual.notificaciones.map((n) => n.id === id ? { ...n, leida: true } : n) }));
+      setAnteriores((actual) => actual.map((n) => n.id === id ? { ...n, leida: true } : n));
+      setError('');
+    } catch (fallo) {
+      if (fallo.status === 401) onSesionCaducada();
+      else setError('No se pudo marcar como leída. Inténtalo nuevamente.');
+    } finally { setOcupado(null); }
+  }
+  async function cargarAnteriores() {
+    if (ocupado) return;
+    setOcupado('pagina');
+    try {
+      const datos = await obtenerNotificaciones({ antes: cursor || bandeja.siguiente });
+      setAnteriores((actual) => [...actual, ...datos.notificaciones]);
+      setCursor(datos.siguiente || 'fin');
+    } catch (fallo) {
+      if (fallo.status === 401) onSesionCaducada();
+      else setError('No se pudieron cargar las notificaciones anteriores.');
+    } finally { setOcupado(null); }
+  }
+  const items = [...new Map([...anteriores, ...bandeja.notificaciones].map((n) => [n.id, n])).values()].sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id));
+  return <div className="pw-notificaciones">
+    <button className="pw-bell" type="button" aria-label={`Notificaciones, ${bandeja.no_leidas} sin leer`}
+      aria-expanded={abierto} aria-controls="bandeja-notificaciones" onClick={() => setAbierto(!abierto)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>
+      {bandeja.no_leidas > 0 && <span className="pw-bell-count">{bandeja.no_leidas > 99 ? '99+' : bandeja.no_leidas}</span>}
+    </button>
+    {nuevoAviso && <aside className="pw-notification-toast" role="status" aria-live="polite">
+      <button className="pw-toast-close" type="button" aria-label="Cerrar aviso" onClick={() => setNuevoAviso(null)}>×</button>
+      <span>NUEVA NOTIFICACIÓN</span><strong>{nuevoAviso.titulo}</strong><p>{nuevoAviso.mensaje}</p>
+      <button className="pw-toast-open" type="button" onClick={() => { setAbierto(true); setNuevoAviso(null); }}>Ver notificaciones →</button>
+    </aside>}
+    {abierto && <section id="bandeja-notificaciones" className="pw-notification-panel" aria-label="Tus notificaciones">
+      <div className="pw-notification-heading"><div><span>TU ESPACIO, AL DÍA</span><h2>Notificaciones</h2></div><button type="button" aria-label="Cerrar notificaciones" onClick={() => setAbierto(false)}>×</button></div>
+      {error && <p className="pw-notification-error" role="alert">{error}</p>}
+      {cargando && <p role="status">Consultando notificaciones…</p>}
+      {!cargando && !error && items.length === 0 && <p className="pw-notification-empty">Estás al día. Aquí aparecerán las novedades de tus talleres y tu cuenta.</p>}
+      <ul>{items.map((n) => <li key={n.id} className={n.leida ? '' : 'pw-notification-unread'}>
+        <span className={`pw-notification-type pw-notification-type-${n.tipo}`}>{({ edicion_taller: 'Tu taller', promocion: 'Tu plaza', bloqueo: 'Tu cuenta' })[n.tipo]}</span>
+        <h3>{n.titulo}</h3><p>{n.mensaje}</p><time dateTime={n.fecha}>{new Intl.DateTimeFormat('es-BO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(n.fecha))}</time>
+        {!n.leida && <button type="button" disabled={Boolean(ocupado)} onClick={() => leer(n.id)}>Marcar como leída</button>}
+      </li>)}</ul>
+      {(cursor ? cursor !== 'fin' : bandeja.siguiente) && <button type="button" className="pw-load-notifications" disabled={Boolean(ocupado)} onClick={cargarAnteriores}>Ver anteriores</button>}
+    </section>}
+  </div>;
+}
 
 function FechaTaller({ valor, zona }) {
   const fecha = new Date(valor);
@@ -284,6 +394,10 @@ export default function CatalogoParticipante({
             </button>
           </nav>
           <div className="pw-user">
+            <Notificaciones onSesionCaducada={onSesionCaducada} onNovedades={() => {
+              setIntento((actual) => actual + 1);
+              setIntentoInscripciones((actual) => actual + 1);
+            }} />
             <span className="pw-avatar" aria-hidden="true">{nombre.charAt(0).toUpperCase()}</span>
             <span className="pw-user-name">{nombre}</span>
             <button className="pw-logout" type="button" onClick={onCerrarSesion} disabled={enviando}>

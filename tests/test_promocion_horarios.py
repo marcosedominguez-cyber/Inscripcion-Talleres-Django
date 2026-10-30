@@ -24,20 +24,23 @@ def solicitud(nombre, *, bloqueada=False):
 
 @pytest.mark.parametrize("segundos_antes, permitido", [(60, True), (59, False), (0, False)])
 def test_promocion_usa_el_mismo_instante_limite_que_la_inscripcion(segundos_antes, permitido):
-    taller = SimpleNamespace(fecha_inicio=INICIO, estado_aprobacion=Taller.Aprobacion.APROBADO)
+    taller = SimpleNamespace(nombre="Taller de prueba", fecha_inicio=INICIO, estado_aprobacion=Taller.Aprobacion.APROBADO)
     siguiente = solicitud("primero")
     with patch.object(servicios.timezone, "now", return_value=INICIO - timedelta(seconds=segundos_antes)), \
          patch.object(servicios, "consultar_espera", return_value=[siguiente]), \
          patch.object(servicios, "buscar_superposicion", return_value=None), \
-         patch.object(servicios, "_serializar_inscripciones") as serializar:
+         patch.object(servicios, "_serializar_inscripciones") as serializar, \
+         patch.object(servicios, "_notificar") as notificar:
         promovido, motivo = servicios._promover_desde_espera(taller)
     if permitido:
         assert promovido is siguiente and motivo is None
+        notificar.assert_called_once()
         assert siguiente.estado == Inscripcion.Estado.CONFIRMADA
         siguiente.save.assert_called_once_with(update_fields=["estado"])
         serializar.assert_called_once_with(siguiente.participante)
     else:
         assert promovido is None and "Fuera de plazo" in motivo
+        notificar.assert_not_called()
         assert siguiente.estado == Inscripcion.Estado.EN_ESPERA
         siguiente.save.assert_not_called()
         serializar.assert_not_called()
@@ -45,7 +48,7 @@ def test_promocion_usa_el_mismo_instante_limite_que_la_inscripcion(segundos_ante
 
 @pytest.mark.parametrize("bloqueo_manual", [False, True])
 def test_promueve_primero_habilitado_y_conserva_en_espera_los_incompatibles(bloqueo_manual):
-    taller = SimpleNamespace(fecha_inicio=INICIO, estado_aprobacion=Taller.Aprobacion.APROBADO)
+    taller = SimpleNamespace(nombre="Taller de prueba", fecha_inicio=INICIO, estado_aprobacion=Taller.Aprobacion.APROBADO)
     bloqueado, incompatible, habilitado, ultimo = [solicitud(n) for n in ("b", "i", "h", "u")]
     bloqueado.participante.bloqueado = bloqueo_manual
     bloqueado.participante.cancelaciones_consecutivas = 0 if bloqueo_manual else 3
@@ -53,7 +56,8 @@ def test_promueve_primero_habilitado_y_conserva_en_espera_los_incompatibles(bloq
     with patch.object(servicios.timezone, "now", return_value=INICIO - timedelta(days=1)), \
          patch.object(servicios, "consultar_espera", return_value=[bloqueado, incompatible, habilitado, ultimo]), \
          patch.object(servicios, "buscar_superposicion", side_effect=[otro, None]) as buscar, \
-         patch.object(servicios, "_serializar_inscripciones") as serializar:
+         patch.object(servicios, "_serializar_inscripciones") as serializar, \
+         patch.object(servicios, "_notificar") as notificar:
         promovido, motivo = servicios._promover_desde_espera(taller)
     assert promovido is habilitado and motivo is None
     assert buscar.call_count == 2

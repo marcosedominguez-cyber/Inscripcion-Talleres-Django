@@ -48,3 +48,13 @@ export function cancelarInscripcion(codigoTaller) {
     method: 'POST', datos: { codigo_taller: codigoTaller },
   });
 }
+
+
+export function obtenerNotificaciones({ signal, antes } = {}) {
+  const query = antes ? `?antes=${encodeURIComponent(antes)}` : '';
+  return solicitudApi(`/api/participantes/notificaciones/${query}`, { signal });
+}
+
+export function marcarNotificacionLeida(id) {
+  return solicitudApi(`/api/participantes/notificaciones/${encodeURIComponent(id)}/leer/`, { method: 'POST', datos: {} });
+}
