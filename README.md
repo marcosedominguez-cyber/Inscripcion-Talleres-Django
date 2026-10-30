@@ -234,3 +234,39 @@ la primera persona en espera, la salida de la espera sin liberar plaza confirmad
 el estado de Mis inscripciones y el bloqueo tras tres cancelaciones.
 Si Atlas rechaza la conexión TLS o no responde, esa comprobación real no se puede
 considerar aprobada; las pruebas unitarias no sustituyen esa verificación.
+
+
+### Notificaciones al participante (CU #25)
+
+La campana del catálogo y de Mis inscripciones presenta tres categorías:
+
+- Cambios de talleres: avisa a las inscripciones activas, confirmadas o en espera,
+  al editar desde React o Django Admin; incluye cambios de aprobación masivos.
+- Promoción: avisa solo a la persona que realmente pasa de espera a confirmada.
+- Bloqueo: informa el motivo de un nuevo bloqueo administrativo o automático
+  por cancelaciones. Reutilizar un bloqueo vigente no vuelve a enviar el aviso.
+
+Las notificaciones se guardan en la colección `notificaciones`, dentro de la
+misma transacción que la operación. Una falla revierte también la operación de
+negocio; no se anuncia una promoción que no se guardó. Una clave de evento por
+participante evita duplicados. Editar sin cambios no crea otro aviso.
+
+La bandeja consulta novedades cada 15 segundos mientras la pestaña está visible,
+y al volver a ella. Un aviso emergente aparece durante 10 segundos al llegar
+una novedad; después sigue disponible en la campana. No usa correo, permisos
+del navegador ni servicios externos.
+Los avisos permanecen disponibles después de cerrar sesión y pueden marcarse
+individualmente como leídos. Los anteriores se consultan por páginas de 20.
+
+API autenticada: `GET /api/participantes/notificaciones/?antes=<id>` y
+`POST /api/participantes/notificaciones/<id>/leer/` (con CSRF).
+Cada consulta y actualización se limita al participante de la sesión.
+
+Al actualizar, aplicar `python manage.py migrate`: la migración `0009_notificacion`
+crea la colección, el índice de bandeja y la unicidad del evento por participante.
+Las notificaciones se generan desde la instalación; no reconstruyen eventos pasados.
+
+Pruebas: `python -m pytest -q`, `npm test -- --configLoader runner` desde frontend,
+y `python scripts/verificar_atlas.py`. Esta última utiliza una base temporal y
+comprueba los tres tipos, lectura persistente, idempotencia y rollback real ante
+una entrega fallida simulada; elimina únicamente su base temporal al terminar.

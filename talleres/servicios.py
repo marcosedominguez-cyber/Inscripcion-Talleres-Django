@@ -2,6 +2,7 @@
 
 import time
 from functools import wraps
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, IntegrityError
@@ -10,7 +11,7 @@ from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
 
 from talleres.consultas import buscar_superposicion, cupos_disponibles, consultar_espera
-from talleres.models import Bloqueo, Cancelacion, Contador, Inscripcion, Usuario, Taller
+from talleres.models import Bloqueo, Cancelacion, Contador, Inscripcion, Notificacion, Usuario, Taller
 from talleres.reglas import (
     LIMITE_CANCELACIONES_CONSECUTIVAS, cancelacion_abierta,
     cuenta_bloqueada_para_inscripciones, inscripcion_abierta, limite_espera,
@@ -193,6 +194,11 @@ def _abrir_bloqueo(participante, motivo, administrador=None, *, reutilizar=False
             "El participante ya tiene un bloqueo vigente."
         ) from None
     _marcar_bloqueado(participante)
+    motivo_visible = dict(Bloqueo.Motivo.choices).get(motivo, motivo)
+    _notificar(participante, Notificacion.Tipo.BLOQUEO, "Tu cuenta ha sido bloqueada",
+        f"Motivo: {motivo_visible}. No puedes realizar nuevas inscripciones ni solicitar espera. "
+        "Tus inscripciones confirmadas se conservan. Contacta a la organización para solicitar la rehabilitación.",
+        f"bloqueo:{bloqueo.pk}")
     return bloqueo
 
 
@@ -292,11 +298,24 @@ def proponer_taller(instructor, nombre, cupos, fecha_inicio, fecha_fin, descripc
     )
 
 
+def actualizar_taller(taller, cambios, *, reenviar_revision=True):
+    # Conservar el antes incluso si la transacción se reintenta después de
+    # modificar el objeto Python (MongoDB revierte los documentos, no el objeto).
+    anteriores = {campo: getattr(taller, campo) for campo in cambios}
+    anteriores["estado_aprobacion"] = taller.estado_aprobacion
+    return _actualizar_taller(taller, cambios, anteriores, reenviar_revision=reenviar_revision)
+
+
 @transaccion_con_reintentos
-def actualizar_taller(taller, cambios):
+def _actualizar_taller(taller, cambios, anteriores, *, reenviar_revision=True):
+    cambios_reales = {campo: (anteriores[campo], valor)
+                      for campo, valor in cambios.items() if anteriores[campo] != valor}
     for campo, valor in cambios.items():
         setattr(taller, campo, valor)
-    taller.estado_aprobacion = Taller.Aprobacion.PENDIENTE
+    if reenviar_revision:
+        if anteriores["estado_aprobacion"] != Taller.Aprobacion.PENDIENTE:
+            cambios_reales["estado_aprobacion"] = (anteriores["estado_aprobacion"], Taller.Aprobacion.PENDIENTE)
+        taller.estado_aprobacion = Taller.Aprobacion.PENDIENTE
     Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") + 1)
     Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") - 1)
     if len(consultar_espera(taller)) > limite_espera(taller.cupos):
@@ -313,6 +332,8 @@ def actualizar_taller(taller, cambios):
         })
     taller.full_clean()
     taller.save()
+    if cambios_reales:
+        _notificar_edicion_taller(taller, cambios_reales)
     return taller
 
 
@@ -446,6 +467,9 @@ def _promover_desde_espera(taller):
         _serializar_inscripciones(participante)
         solicitud.estado = Inscripcion.Estado.CONFIRMADA
         solicitud.save(update_fields=["estado"])
+        _notificar(participante, Notificacion.Tipo.PROMOCION, "¡Tu plaza está confirmada!",
+            f"Se liberó una plaza en {taller.nombre}. Pasaste de la lista de espera a una inscripción confirmada.",
+            f"promocion:{solicitud.pk}", taller=taller)
         return solicitud, None
     return None, motivo
 
@@ -521,3 +545,46 @@ def cancelar_inscripcion(ci, codigo_taller):
     cancelacion.cancelaciones_consecutivas = total_cancelaciones
     cancelacion.cuenta_bloqueada = esta_bloqueado(participante)
     return cancelacion
+
+
+def _notificar(participante, tipo, titulo, mensaje, clave_evento, *, taller=None):
+    """Persistir con el evento de negocio: si la transacción falla, nada se publica.
+
+    La clave impide duplicar el aviso al volver a procesar el mismo evento.
+    """
+    return Notificacion.objects.get_or_create(
+        participante=participante, clave_evento=clave_evento,
+        defaults={"tipo": tipo, "titulo": titulo, "mensaje": mensaje, "taller": taller},
+    )[0]
+
+
+def _notificar_edicion_taller(taller, cambios):
+    etiquetas = {"nombre": "Nombre", "descripcion": "Descripción", "cupos": "Cupo",
+                 "fecha_inicio": "Inicio", "fecha_fin": "Fin", "instructor": "Instructor",
+                 "estado_aprobacion": "Estado de aprobación"}
+    def visible(valor):
+        if hasattr(valor, "tzinfo"):
+            return timezone.localtime(valor).strftime("%d/%m/%Y %H:%M")
+        if hasattr(valor, "nombre"):
+            return valor.nombre
+        return str(valor) if valor is not None else "Sin asignar"
+    detalles = []
+    for campo, (anterior, nuevo) in cambios.items():
+        if campo not in etiquetas:
+            continue
+        if campo == "descripcion":
+            detalles.append("Descripción actualizada.")
+        else:
+            detalles.append(f"{etiquetas[campo]}: {visible(anterior)} → {visible(nuevo)}.")
+    if not detalles:
+        return
+    mensaje = f"Se actualizó el taller {taller.nombre}. " + " ".join(detalles)
+    if "fecha_inicio" in cambios or "fecha_fin" in cambios:
+        mensaje += f" Horarios en {timezone.get_current_timezone_name()}."
+    evento = f"edicion:{uuid4().hex}"
+    destinatarios = set(Inscripcion.objects.filter(
+        taller=taller, estado__in=[Inscripcion.Estado.CONFIRMADA, Inscripcion.Estado.EN_ESPERA],
+    ).values_list("participante_id", flat=True))
+    for participante_id in destinatarios:
+        _notificar(Usuario(pk=participante_id), Notificacion.Tipo.EDICION_TALLER,
+                   "Cambios en tu taller", mensaje, evento, taller=taller)

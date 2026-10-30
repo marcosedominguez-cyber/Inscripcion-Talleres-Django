@@ -14,7 +14,8 @@ from django.utils.text import capfirst
 from talleres.admin_site import admin_site
 from talleres.models import Bloqueo, Cancelacion, Inscripcion, Taller, Usuario
 from talleres.servicios import (
-    BloqueoParticipanteError, bloquear_participante, rehabilitar_participante,
+    BloqueoParticipanteError, actualizar_taller, bloquear_participante, rehabilitar_participante,
+    _notificar_edicion_taller, transaccion_con_reintentos,
 )
 
 _VALOR_AUSENTE = object()
@@ -149,7 +150,9 @@ class AdminSistemaModelAdmin(admin.ModelAdmin):
         return self._autorizado(request)
 
     def has_delete_permission(self, request, obj=None):
-        return self._autorizado(request)
+        # Conservar usuarios, talleres e inscripciones: el retiro se registra
+        # mediante el servicio de cancelación, no mediante borrados del admin.
+        return False
 
 
 @admin.register(Usuario, site=admin_site)
@@ -451,6 +454,13 @@ class TallerAdmin(AdminSistemaModelAdmin):
     actions = ("aprobar_seleccionados", "rechazar_seleccionados")
     etiquetas_auditoria = {"estado_aprobacion": "Estado de aprobación"}
 
+    def save_model(self, request, obj, form, change):
+        if not change:
+            return super().save_model(request, obj, form, change)
+        anterior = Taller.objects.get(pk=obj.pk)
+        actualizar_taller(anterior, {campo: getattr(obj, campo) for campo in form.changed_data},
+                          reenviar_revision=False)
+
     @admin.action(description="Aprobar propuestas seleccionadas")
     def aprobar_seleccionados(self, request, queryset):
         self._cambiar_estado_talleres(
@@ -463,6 +473,7 @@ class TallerAdmin(AdminSistemaModelAdmin):
             request, queryset, Taller.Aprobacion.RECHAZADO, "rechazados",
         )
 
+    @transaccion_con_reintentos
     def _cambiar_estado_talleres(self, request, queryset, nuevo_estado, resultado):
         etiqueta = self._etiqueta_campo("estado_aprobacion")
         campo = self.model._meta.get_field("estado_aprobacion")
@@ -484,6 +495,7 @@ class TallerAdmin(AdminSistemaModelAdmin):
             if not afectados:
                 continue
             taller.estado_aprobacion = nuevo_estado
+            _notificar_edicion_taller(taller, {"estado_aprobacion": (anterior, nuevo_estado)})
             self.log_change(
                 request,
                 taller,

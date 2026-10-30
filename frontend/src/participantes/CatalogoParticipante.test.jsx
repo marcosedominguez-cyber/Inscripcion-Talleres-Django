@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import CatalogoParticipante from './CatalogoParticipante.jsx';
 import {
   cancelarInscripcion, inscribirEnTaller, obtenerMisInscripciones, solicitarEspera,
+  obtenerNotificaciones, marcarNotificacionLeida,
 } from './api.js';
 
 vi.mock('./api.js', () => ({
@@ -11,6 +12,8 @@ vi.mock('./api.js', () => ({
   obtenerMisInscripciones: vi.fn(),
   inscribirEnTaller: vi.fn(),
   solicitarEspera: vi.fn(),
+  obtenerNotificaciones: vi.fn().mockResolvedValue({ notificaciones: [], no_leidas: 0 }),
+  marcarNotificacionLeida: vi.fn(),
   cancelarInscripcion: vi.fn(),
 }));
 
@@ -31,6 +34,10 @@ function catalogo(disponibles) {
 }
 
 beforeEach(() => {
+  obtenerNotificaciones.mockReset();
+  obtenerNotificaciones.mockResolvedValue({ notificaciones: [], no_leidas: 0, siguiente: null });
+  marcarNotificacionLeida.mockReset();
+  marcarNotificacionLeida.mockResolvedValue({ mensaje: 'Notificación leída.' });
   inscribirEnTaller.mockReset();
   solicitarEspera.mockReset();
   inscribirEnTaller.mockResolvedValue({ mensaje: 'Te inscribiste correctamente.' });
@@ -39,7 +46,7 @@ beforeEach(() => {
   cancelarInscripcion.mockReset();
   cancelarInscripcion.mockResolvedValue({ mensaje: 'Cancelación registrada.' });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 test.each([
   [false, 'Fuera de plazo: el límite de inscripción ya venció.'],
@@ -404,4 +411,58 @@ test('el logo join.a.workshop vuelve al catálogo desde Mis inscripciones', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Acciones para Taller confirmado' }));
   fireEvent.click(screen.getByRole('menuitem', { name: 'Cancelar inscripción' }));
   expect(screen.getByRole('dialog', { name: 'Cancelar inscripción' })).toBeTruthy();
+});
+
+
+function aviso(id, tipo = 'promocion') {
+  return { id, tipo, titulo: tipo === 'promocion' ? '¡Tu plaza está confirmada!' : 'Cambios en tu taller',
+    mensaje: 'Hay novedades para ti.', fecha: '2030-10-15T10:00:00Z', leida: false };
+}
+
+test('la campana muestra una promoción y permite marcarla como leída', async () => {
+  obtenerNotificaciones.mockResolvedValue({ notificaciones: [aviso('aviso-1')], no_leidas: 1 });
+  render(<CatalogoParticipante cargarCatalogo={vi.fn().mockResolvedValue(catalogo(1))}
+    usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Notificaciones, 1 sin leer' }));
+  expect(screen.getByRole('heading', { name: '¡Tu plaza está confirmada!' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Marcar como leída' }));
+  await waitFor(() => expect(marcarNotificacionLeida).toHaveBeenCalledWith('aviso-1'));
+  await screen.findByRole('button', { name: 'Notificaciones, 0 sin leer' });
+  expect(screen.queryByRole('button', { name: 'Marcar como leída' })).toBeNull();
+});
+
+test('llegan avisos automáticamente y se refresca el catálogo', async () => {
+  const { act } = await import('@testing-library/react');
+  vi.useFakeTimers();
+  obtenerNotificaciones.mockResolvedValueOnce({ notificaciones: [], no_leidas: 0 })
+    .mockResolvedValue({ notificaciones: [aviso('nuevo', 'edicion_taller')], no_leidas: 1 });
+  const cargarCatalogo = vi.fn().mockResolvedValue(catalogo(1));
+  render(<CatalogoParticipante cargarCatalogo={cargarCatalogo} usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  await act(async () => { await Promise.resolve(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+  expect(screen.getByRole('button', { name: 'Notificaciones, 1 sin leer' })).toBeTruthy();
+  expect(cargarCatalogo).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole('status').textContent).toContain('Cambios en tu taller');
+});
+
+test('fallo de lectura conserva el aviso sin leer', async () => {
+  obtenerNotificaciones.mockResolvedValue({ notificaciones: [aviso('a')], no_leidas: 1 });
+  marcarNotificacionLeida.mockRejectedValue(new Error('Sin conexión'));
+  render(<CatalogoParticipante cargarCatalogo={vi.fn().mockResolvedValue(catalogo(1))}
+    usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Notificaciones, 1 sin leer' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Marcar como leída' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('No se pudo marcar');
+  expect(screen.getByRole('button', { name: 'Notificaciones, 1 sin leer' })).toBeTruthy();
+});
+
+test('se pueden consultar notificaciones anteriores', async () => {
+  obtenerNotificaciones.mockResolvedValueOnce({ notificaciones: [aviso('b')], no_leidas: 2, siguiente: 'b' })
+    .mockResolvedValue({ notificaciones: [aviso('a', 'edicion_taller')], no_leidas: 2, siguiente: null });
+  render(<CatalogoParticipante cargarCatalogo={vi.fn().mockResolvedValue(catalogo(1))}
+    usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Notificaciones, 2 sin leer' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Ver anteriores' }));
+  await screen.findByRole('heading', { name: 'Cambios en tu taller' });
+  expect(obtenerNotificaciones).toHaveBeenCalledWith({ antes: 'b' });
 });
