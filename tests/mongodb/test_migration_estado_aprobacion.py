@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo():
+def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo(migrar_desde_base_limpia):
     # Segunda barrera: incluso con settings equivocados, abortar antes de tocar datos.
     settings = connection.settings_dict
     host = settings.get("HOST", "")
@@ -40,8 +40,7 @@ def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo():
     assert settings["NAME"] in _NOMBRES_DB_LOCAL
 
     destino_previo = [("talleres", "0002_usuario_cuentas")]
-    executor = MigrationExecutor(connection)
-    executor.migrate(destino_previo)
+    migrar_desde_base_limpia(destino_previo)
 
     ahora = timezone.now()
     collection = connection.get_collection("talleres")
@@ -88,9 +87,12 @@ def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo():
     }
 
     migracion = import_module("talleres.migrations.0003_taller_estado_aprobacion")
+    apps = executor.loader.project_state([
+        ("talleres", "0003_taller_estado_aprobacion"),
+    ]).apps
     with connection.schema_editor() as schema_editor:
         migracion.completar_estado_aprobacion_ausente(
-            None, schema_editor
+            apps, schema_editor
         )
 
     resultados_repetidos = {

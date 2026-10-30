@@ -32,6 +32,7 @@ function catalogo(disponibles) {
 
 beforeEach(() => {
   inscribirEnTaller.mockReset();
+  solicitarEspera.mockReset();
   inscribirEnTaller.mockResolvedValue({ mensaje: 'Te inscribiste correctamente.' });
   obtenerMisInscripciones.mockReset();
   obtenerMisInscripciones.mockResolvedValue({ inscripciones: [], zona_horaria: 'UTC' });
@@ -39,6 +40,31 @@ beforeEach(() => {
   cancelarInscripcion.mockResolvedValue({ mensaje: 'Cancelación registrada.' });
 });
 afterEach(cleanup);
+
+test.each([
+  [false, 'Fuera de plazo: el límite de inscripción ya venció.'],
+  [false, 'Superposición de horarios: ya tienes una inscripción confirmada en T-001.'],
+  [true, 'Fuera de plazo: el límite de inscripción ya venció.'],
+  [true, 'Superposición de horarios: ya tienes una inscripción confirmada en T-001.'],
+])('conserva el motivo de rechazo del servicio (espera=%s): %s', async (espera, motivo) => {
+  const datos = catalogo(espera ? 0 : 1);
+  if (espera) datos.talleres[0].lugares_espera = 1;
+  const cargarCatalogo = vi.fn().mockResolvedValueOnce(datos)
+    .mockRejectedValue(new Error('Fallo al refrescar el catálogo.'));
+  const servicio = espera ? solicitarEspera : inscribirEnTaller;
+  servicio.mockRejectedValue(Object.assign(new Error(motivo), { status: 409 }));
+  render(<CatalogoParticipante cargarCatalogo={cargarCatalogo}
+    usuario={{ nombre_usuario: 'Ana' }} onSesionCaducada={vi.fn()} />);
+
+  fireEvent.click(await screen.findByRole('button', {
+    name: espera ? 'Entrar en lista de espera' : 'Inscribirme',
+  }));
+
+  expect((await screen.findByRole('alert')).textContent).toContain(motivo);
+  await waitFor(() => expect(cargarCatalogo).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole('alert').textContent).toContain(motivo);
+  expect(screen.queryByText('Te inscribiste correctamente.')).toBeNull();
+});
 
 test('inscribirse confirma el resultado y refresca los cupos sin recargar la página', async () => {
   const cargarCatalogo = vi.fn()

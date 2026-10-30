@@ -510,6 +510,17 @@ class InscripcionAdmin(AdminSistemaModelAdmin):
     search_fields = ("participante__nombre", "participante__ci", "taller__codigo", "taller__nombre")
     list_select_related = ("participante", "taller")
 
+    # Las altas, promociones y cancelaciones pasan por los servicios para
+    # respetar las reglas y conservar el historial, también para administradores.
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(Cancelacion, site=admin_site)
 class CancelacionAdmin(AdminSistemaModelAdmin):

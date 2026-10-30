@@ -3,7 +3,7 @@
 from django.utils import timezone
 
 from talleres.models import Cancelacion, Inscripcion, Taller
-from talleres.reglas import inscripcion_abierta
+from talleres.reglas import horarios_superpuestos, inscripcion_abierta
 
 
 def cupos_disponibles(taller):
@@ -34,6 +34,19 @@ def listar_inscripciones_participante(participante):
         ).select_related("taller", "taller__instructor")
         if inscripcion.taller.fecha_fin > ahora
     ]
+
+
+def buscar_superposicion(participante, taller):
+    confirmadas = Inscripcion.objects.filter(
+        participante=participante, estado=Inscripcion.Estado.CONFIRMADA,
+    ).exclude(taller_id=taller.pk).select_related("taller")
+    for inscripcion in confirmadas:
+        otro = inscripcion.taller
+        if horarios_superpuestos(
+            taller.fecha_inicio, taller.fecha_fin, otro.fecha_inicio, otro.fecha_fin,
+        ):
+            return otro
+    return None
 
 
 def listar_cancelaciones_participante(participante):

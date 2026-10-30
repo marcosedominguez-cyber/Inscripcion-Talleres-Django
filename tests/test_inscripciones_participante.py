@@ -52,6 +52,7 @@ class ServicioInscripcionTests(SimpleTestCase):
             patch.object(servicios.Taller, "objects", manager_talleres),
             patch.object(servicios.Inscripcion, "objects", manager_inscripciones),
             patch.object(servicios, "cupos_disponibles", return_value=disponibles),
+            patch.object(servicios, "buscar_superposicion", return_value=None),
             patch.object(servicios.timezone, "now", return_value=ahora or self.ahora),
         ):
             usuarios.get.return_value = participante
@@ -200,6 +201,7 @@ class ServicioEsperaTests(SimpleTestCase):
              patch.object(servicios.Taller, "objects", self.escrituras), \
              patch.object(servicios.Inscripcion, "objects", self.inscripciones), \
              patch.object(servicios, "cupos_disponibles", return_value=disponibles), \
+             patch.object(servicios, "buscar_superposicion", return_value=None), \
              patch.object(servicios, "consultar_espera", side_effect=[[None] * ocupadas, [SimpleNamespace(pk="nueva")]]), \
              patch.object(servicios.timezone, "now", return_value=ServicioInscripcionTests.ahora):
             usuarios.get.return_value = SimpleNamespace(pk="p")

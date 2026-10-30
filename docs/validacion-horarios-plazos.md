@@ -1,81 +1,130 @@
-# Validación de horarios y plazos — primera entrega
+# Validación de horarios y plazos — CU #4
 
-## Alcance
+## Alcance y base
 
-Revisión de las tareas #13 y #14 del caso de uso #4. La segunda entrega
-queda reservada para superposición (#15), mensajes de rechazo (#16) y
-las pruebas completas de plazo y superposición (#17).
+Entrega completa de las tareas #13–#17 sobre `main` en `c5f2083`.
+Incluye la primera entrega fusionada en el PR #62 y se integra con las
+cancelaciones del PR #61 y el diseño join.a.workshop del PR #63.
 
-## Inicio y fin del taller (#13)
+| Tarea | Comportamiento comprobado |
+| --- | --- |
+| #13 | Inicio y fin obligatorios, conservación de fecha/hora y duración válida. |
+| #14 | Catálogo, inscripción, espera y promoción comparten el mismo límite. |
+| #15 | Se rechaza una solicitud que se cruza con otra confirmación de la persona. |
+| #16 | API, catálogo y menú muestran el motivo de plazo o superposición. |
+| #17 | Pruebas de límites, rechazos sin cambios, promociones y concurrencia real. |
 
-Los campos `fecha_inicio` y `fecha_fin` ya existen como fechas con hora.
-No se agregan columnas ni migraciones. Se verifica que el formulario de
-gestión y el modelo conserven ambas fechas y horas en `America/La_Paz`.
+## Fechas y horas (#13)
 
-Se mantienen las reglas existentes compartidas en `talleres/reglas.py`:
+Se mantienen los campos existentes `fecha_inicio` y `fecha_fin`, las fechas en
+UTC y su presentación en `America/La_Paz`. El modelo, el formulario y el servicio
+aplican `error_duracion`: fin posterior al inicio, entre 24 horas y 7 días,
+incluidos los dos límites. Un dato inválido se rechaza antes de consumir un
+código de taller. No se agrega ni modifica ningún campo o migración.
 
-- Fin posterior al inicio.
-- Duración mínima de 24 horas y máxima de 7 días, incluidos ambos límites.
-- Inicio y fin obligatorios.
-- Un horario inválido se rechaza antes de consumir un código o guardar el taller.
+## Plazo (#14)
 
-## Plazo de inscripción (#14)
+`inscripcion_abierta` mantiene el criterio de aceptación de #4 y TAL-RT-01
+en `docs/sesion_06_requisitos.md`: se permite el instante de un minuto antes.
+El reloj es el del servidor y los segundos no se redondean.
 
-El criterio de aceptación del caso de uso #4 y TAL-RT-01 en
-`docs/sesion_06_requisitos.md` permiten la solicitud a las 11:59 para un
-taller de las 12:00. Se conserva el cierre un minuto antes, incluyendo
-el instante límite. Esto corrige el rechazo previo de las 11:59 exactas.
-
-| Hora de solicitud, con inicio a las 12:00 | Resultado del plazo |
+| Solicitud para inicio a las 12:00 | Resultado del plazo |
 | --- | --- |
 | 11:58:59 | Puede continuar |
 | 11:59:00 | Puede continuar: límite incluido |
 | 11:59:01 | Fuera de plazo |
 | 12:00:00 o después | Fuera de plazo |
 
-La aceptación final también requiere cumplir las otras reglas de inscripción.
-El límite es un instante preciso; no se redondean los segundos al minuto.
+La aceptación también requiere cumplir las demás reglas. El catálogo usa
+la misma función que el servicio. La promoción se comprueba en el momento de
+intentar confirmar; una solicitud previa en espera no permite saltar el cierre.
+Una cancelación sigue permitida hasta el inicio, según la regla existente,
+aunque ya no se pueda promover a alguien durante el último minuto.
 
-`inscripcion_abierta` es la regla temporal compartida por el catálogo y el
-servicio persistente. La consulta primero obtiene talleres aprobados que
-todavía no comenzaron y aplica esa misma función con un único valor de
-`ahora`. Así evita mantener otra comparación de cierre en la consulta.
+## Superposición (#15)
 
-La inscripción normal y la lista de espera utilizan `_registrar_solicitud`,
-que ya llama a esa regla. El menú de terminal llama al mismo servicio.
-El servidor determina la hora; el cliente no puede enviarla para ampliar el plazo.
+La regla pura `horarios_superpuestos` compara fechas completas:
+`inicio_a < fin_b` y `inicio_b < fin_a`. Detecta cruce parcial, contención y
+horarios idénticos, también entre días y zonas horarias distintas.
 
-## Revisión de sospechoso.pdf
+Se adopta el criterio de intervalos adyacentes sin tiempo compartido: un taller
+que termina exactamente cuando comienza el otro no se solapa. La entrevista
+dejaba pendiente ese extremo; no se añade un margen de traslado no definido.
+Si el cliente exige otro criterio, se cambia esta función y sus pruebas.
 
-El informe pide compartir la regla de cierre entre consulta y servicio.
-Se atiende ese hallazgo dentro del alcance de #14. El criterio de límite
-incluido se fundamenta en los requisitos del proyecto, porque el informe
-solicita aclararlo y no fija por sí mismo ese criterio.
+`buscar_superposicion` consulta solo confirmaciones de la misma persona y
+excluye el taller solicitado. Una espera no equivale a una confirmación.
+Las cancelaciones permanecen en el historial, pero no bloquean nuevas
+inscripciones por horarios. La solicitud incompatible se rechaza antes de
+crear registros, modificar plazas o cambiar el contador del participante.
 
-El informe también advierte que las pruebas con mocks no acreditan consultas
-ni transacciones reales en MongoDB. Las comprobaciones de esta entrega son
-unitarias, de validación y de API con dependencias simuladas; no prueban
-concurrencia ni persistencia real. No se ejecutan contra Atlas.
+La inscripción normal, la solicitud de espera y la promoción usan la misma
+validación. La promoción recorre el orden de fecha e ID de la espera y confirma
+a la primera persona que cumpla plazo, aprobación, bloqueo y horarios.
+Las incompatibles permanecen en espera, sin cancelarlas ni penalizarlas.
+Este criterio conserva FIFO entre solicitudes habilitadas; si no hay ninguna,
+la plaza queda libre y la cancelación informa el motivo sin revelar la identidad
+de otras personas.
 
-Los demás hallazgos del informe quedan fuera de estas dos tareas.
+El Admin mantiene la consulta de inscripciones; no permite altas, cambios de
+estado o borrados directos que evadan el servicio o el historial de cancelación.
+Las operaciones se realizan desde la aplicación o el menú mediante los servicios.
 
-## Comprobación
+## Mensajes (#16)
 
-Desde la raíz del repositorio, con las dependencias de `requirements.txt`:
+- Plazo: indica que está vencido, el instante límite y la zona horaria.
+- Superposición: identifica el taller confirmado que impide la solicitud y
+  muestra su intervalo y zona horaria.
+- La API conserva el formato `detail` con estado HTTP 409.
+- El catálogo muestra el motivo incluso si falla su actualización posterior.
+- El menú captura el mismo error de negocio sin mostrar un traceback.
+
+Se preservan las validaciones de sesión, perfil, CSRF, aprobación, duplicados,
+plazas y bloqueos. Las comprobaciones en memoria de `proyecto/reglas_*.py`
+siguen siendo una referencia histórica; el menú operativo usa el servicio Django.
+
+## Transacciones y concurrencia (#17)
+
+La comprobación y la escritura ocurren dentro de la transacción con reintentos
+existente. Además del taller, se escribe el documento del participante para
+que dos solicitudes suyas a talleres distintos generen conflicto de escritura.
+Se sigue el patrón existente de dos escrituras reales con valores opuestos,
+utilizando el contador de cancelaciones: su valor final no cambia al inscribirse.
+Una cancelación sí mantiene su incremento de negocio habitual.
+
+Ante un conflicto transitorio se vuelve a consultar y validar. Esto impide que
+dos lecturas simultáneas sin confirmaciones permitan después dos horarios
+incompatibles. La promoción también serializa la escritura de su participante.
+
+En respuesta a `sospechoso.pdf`, no se usa una prueba con mocks como evidencia de
+persistencia o concurrencia. Se agregan pruebas reales aisladas en
+`tests/mongodb/test_horarios_plazos.py`, ejecutadas en MongoDB 8.0.17 local con
+replica set. Comprueban rechazo sin escrituras, espera, promoción, límite exacto,
+inscripciones simultáneas y promoción simultánea con otra inscripción.
+Estas pruebas no utilizan Atlas ni los datos del equipo.
+
+## Comprobación reproducible
+
+Con las dependencias del proyecto instaladas:
 
 ```bash
 python -m pytest -q
-git diff --check
+cd frontend
+npm ci
+npm test
+npm run build
 ```
 
-Pruebas específicas añadidas:
+Para la integración real se necesita un MongoDB local en `127.0.0.1:27017`,
+configurado como replica set. La configuración está fijada a una base de pruebas
+local y no carga `.env`. Con esa instancia disponible, desde la raíz:
 
-- `tests/test_horarios_taller.py`: obligatoriedad, conservación de fecha/hora,
-  límites de duración y rechazos consistentes en modelo, formulario y servicio.
-- `tests/test_plazo_catalogo.py`: catálogo y regla comparten el límite y comparan
-  instantes equivalentes en distintas zonas horarias.
-- `tests/test_plazo_inscripciones.py`: inscripción, espera y sus APIs respetan
-  el mismo plazo; los rechazos no crean inscripciones ni actualizan el taller.
+```bash
+python -m pytest -q tests/mongodb/test_horarios_plazos.py \
+  --ds=config.settings_test_mongodb_local --create-db
+```
 
-Se ajustan las pruebas anteriores que esperaban rechazar el límite exacto.
-No se marca el caso de uso #4 ni la tarea #17 como completos en esta entrega.
+La suite normal omite los tests MongoDB por su configuración SQLite aislada;
+ejecutar la suite normal no acredita que la integración MongoDB haya pasado.
+Los resultados de la integración se reportan por separado. La comprobación
+local tampoco certifica conectividad ni configuración del clúster Atlas.

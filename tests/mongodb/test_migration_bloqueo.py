@@ -31,13 +31,14 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_migracion_inicializa_estado_sin_inventar_historial_ni_tocar_cancelaciones():
+def test_migracion_inicializa_estado_sin_inventar_historial_ni_tocar_cancelaciones(migrar_desde_base_limpia):
     settings = connection.settings_dict
     assert settings.get("HOST") in _HOSTS_MONGODB_LOCAL
     assert settings["NAME"] in _NOMBRES_DB_LOCAL
 
-    executor = MigrationExecutor(connection)
-    executor.migrate([("talleres", "0007_usuario_cancelaciones_consecutivas_cancelacion")])
+    migrar_desde_base_limpia([
+        ("talleres", "0007_usuario_cancelaciones_consecutivas_cancelacion"),
+    ])
 
     ahora = datetime(2030, 10, 15, 9, 0, tzinfo=dt_timezone.utc)
     participantes = connection.get_collection("participantes")
@@ -94,6 +95,7 @@ def test_migracion_inicializa_estado_sin_inventar_historial_ni_tocar_cancelacion
         "fecha_cancelacion": ahora,
     }
     cancelaciones.insert_one(cancelacion)
+    antecedente = cancelaciones.find_one({"_id": cancelacion["_id"]})
     total_cancelaciones = cancelaciones.count_documents({})
 
     executor = MigrationExecutor(connection)
@@ -113,7 +115,7 @@ def test_migracion_inicializa_estado_sin_inventar_historial_ni_tocar_cancelacion
         "sin_contador": False,
     }
     assert cancelaciones.count_documents({}) == total_cancelaciones
-    assert cancelaciones.find_one({"_id": cancelacion["_id"]}) == cancelacion
+    assert cancelaciones.find_one({"_id": cancelacion["_id"]}) == antecedente
 
     bloqueos = connection.get_collection("bloqueos")
     assert bloqueos.count_documents({}) == 0

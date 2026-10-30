@@ -42,6 +42,7 @@ def solicitud(request):
         patch.object(servicios.Taller, "objects", talleres),
         patch.object(servicios.Inscripcion, "objects", inscripciones),
         patch.object(servicios, "cupos_disponibles", return_value=0 if espera else 1) as cupos,
+        patch.object(servicios, "buscar_superposicion", return_value=None),
         patch.object(servicios, "consultar_espera", side_effect=[[], [creada]]) as cola,
         patch.object(servicios.timezone, "now") as reloj,
     ):
@@ -99,6 +100,8 @@ def test_api_aplica_el_plazo_del_servicio_sin_confiar_en_el_reloj_del_cliente(
     if estado_http == 201:
         assert datos["inscripcion"]["estado"] == solicitud.creada.estado
     else:
-        assert datos["detail"] == "La inscripción cierra un minuto antes del inicio del taller."
+        assert datos["detail"].startswith("Fuera de plazo:")
+        assert "15/10/2030 a las 11:59:00" in datos["detail"]
+        assert "America/La_Paz" in datos["detail"]
         solicitud.inscripciones.create.assert_not_called()
         solicitud.talleres.filter.assert_not_called()
