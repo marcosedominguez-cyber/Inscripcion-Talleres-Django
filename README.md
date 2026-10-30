@@ -223,7 +223,8 @@ El catálogo devuelve `mi_estado`, `posicion_espera`, `limite_espera` y `lugares
 - Una inscripción activa (confirmada o en espera) puede cancelarse mientras el taller no haya comenzado.
 - La cancelación elimina la inscripción activa y conserva un registro en la colección `cancelaciones` con `codigo_taller`, `nombre_taller`, `estado_anterior` y `fecha_cancelacion`. La re-inscripción posterior crea una solicitud nueva y no borra el antecedente.
 - Si se cancela una inscripción confirmada, la primera persona en espera pasa a confirmada respetando `fecha_solicitud` e `id`; no se crea otro registro ni se altera el cupo total.
-- Cada cancelación incrementa `Usuario.cancelaciones_consecutivas`. Al llegar a tres se abre un episodio automático en `bloqueos` y la cuenta no puede crear nuevas inscripciones ni solicitudes de espera.
+- Cada cancelación voluntaria incrementa `Usuario.cancelaciones_consecutivas`. Al llegar a tres se abre un episodio automático en `bloqueos` y la cuenta no puede crear nuevas inscripciones ni solicitudes de espera.
+- Un bloqueo manual o automático cancela todas las inscripciones confirmadas y solicitudes en espera de la persona, incluso si el taller ya comenzó. Cada retiro conserva su antecedente en `cancelaciones`; los retiros forzados no aumentan el contador de cancelaciones voluntarias. Las plazas confirmadas liberadas se ofrecen según las reglas de promoción vigentes. El bloqueo, los retiros y los avisos se guardan en una misma transacción; rehabilitar no restaura inscripciones.
 - El panel administrativo permite bloquear participantes con un motivo controlado y rehabilitarlos desde la ficha individual o mediante las acciones masivas. La rehabilitación registra fecha y administrador en el mismo episodio, conserva el historial y solo reinicia el contador cuando este alcanzó el límite, para iniciar un ciclo disciplinario nuevo.
 - API: `POST /api/participantes/inscripciones/cancelar/` con `codigo_taller` e identidad desde la sesión. `GET /api/participantes/inscripciones/` devuelve también `cancelaciones`, `cancelaciones_consecutivas`, `limite_cancelaciones` e `inscripciones_bloqueadas`.
 - La migración `0007_usuario_cancelaciones_consecutivas_cancelacion.py` agrega el contador y la colección de historial. La migración `0008_usuario_bloqueado_bloqueo.py` agrega `Usuario.bloqueado`, crea `bloqueos` e inicializa el estado de bloqueo de los participantes existentes sin crear historial sintético ni alterar cancelaciones.
@@ -291,3 +292,10 @@ Pruebas: `python -m pytest -q`, `npm test -- --configLoader runner` desde fronte
 y `python scripts/verificar_atlas.py`. Esta última utiliza una base temporal y
 comprueba los tres tipos, lectura persistente, idempotencia y rollback real ante
 una entrega fallida simulada; elimina únicamente su base temporal al terminar.
+
+### Acceso según el tipo de cuenta
+
+El inicio de sesión web envía `ci`, `contrasena` y `rol` (`participante` o
+`instructor`). Django comprueba el rol real antes de abrir la sesión y rechaza
+el acceso desde la sección contraria. Las cuentas administrativas acceden por
+`/admin/`; el selector público no concede privilegios.

@@ -57,7 +57,7 @@ export default function App() {
         setPantalla('login');
         setMensaje(result.mensaje);
       } else {
-        const result = await api('login', datos);
+        const result = await api('login', { ...datos, rol });
         setUsuario(result.usuario);
         setPantalla(result.usuario.rol === 'participante' ? 'catalogo' : 'cuenta');
       }
@@ -117,28 +117,28 @@ export default function App() {
                 <button className="jw-button" onClick={() => navegar('login')}>Descubrir talleres <span aria-hidden="true">↗</span></button>
                 <button className="jw-text-button" onClick={() => navegar('registro', 'instructor')}>Quiero enseñar <span aria-hidden="true">→</span></button>
               </div>
-              <div className="jw-hero-foot"><span className="jw-mini-spark" aria-hidden="true">✳</span><p>Aprende algo nuevo.<br /><strong>Hazlo parte de ti.</strong></p></div>
+              <div className="jw-hero-foot"><span className="jw-mini-spark" aria-hidden="true"><span className="jw-join-mark" aria-hidden="true" /></span><p>Aprende algo nuevo.<br /><strong>Hazlo parte de ti.</strong></p></div>
             </div>
             <div className="jw-art" aria-label="Ilustración de tarjetas de aprendizaje">
               <div className="jw-art-orbit" /><span className="jw-art-note">MENOS RUTINA. MÁS CURIOSIDAD.</span>
-              <div className="jw-paper jw-paper-back"><span>UNA IDEA PUEDE</span><strong>cambiar<br />tu día.</strong><span className="jw-paper-sun" aria-hidden="true">☼</span></div>
+              <div className="jw-paper jw-paper-back"><span>UNA IDEA PUEDE</span><strong>cambiar<br />tu día.</strong><span className="jw-paper-sun" aria-hidden="true"><span className="jw-join-mark" aria-hidden="true" /></span></div>
               <div className="jw-paper jw-paper-front"><span>TU PRÓXIMO PASO</span><div className="jw-paper-drawing" aria-hidden="true"><i /><i /><i /></div><strong>empieza<br />por aquí<span>.</span></strong><div className="jw-paper-bottom">join.a.workshop <span>↗</span></div></div>
-              <span className="jw-art-spark" aria-hidden="true">✳</span><span className="jw-art-caption">El gusto de empezar algo.</span>
+              <span className="jw-art-spark" aria-hidden="true"><span className="jw-join-mark" aria-hidden="true" /></span><span className="jw-art-caption">El gusto de empezar algo.</span>
             </div>
           </section>
-          <div className="jw-ribbon"><span>Aprender haciendo</span><i>✳</i><span>Compartir ideas</span><i>✳</i><span>Encontrar tu espacio</span><i>✳</i><span>Volver a sorprenderte</span></div>
+          <div className="jw-ribbon"><span>Aprender haciendo</span><i><span className="jw-join-mark" aria-hidden="true" /></i><span>Compartir ideas</span><i><span className="jw-join-mark" aria-hidden="true" /></i><span>Encontrar tu espacio</span><i><span className="jw-join-mark" aria-hidden="true" /></i><span>Volver a sorprenderte</span></div>
           <section id="como-funciona" className="jw-how">
             <div className="jw-section-heading"><div><p className="jw-eyebrow">ASÍ DE SIMPLE</p><h2>De la curiosidad<br />a la acción.</h2></div><p>Tu próxima experiencia empieza con un pequeño paso. Tú eliges cuál.</p></div>
             <div className="jw-steps">
               <article><span className="jw-step-number">01 /</span><span className="jw-step-icon" aria-hidden="true">⌕</span><h3>Encuentra tu taller</h3><p>Explora las propuestas y encuentra ese tema que te da ganas de saber más.</p></article>
               <article><span className="jw-step-number">02 /</span><span className="jw-step-icon" aria-hidden="true">↗</span><h3>Hazte un lugar</h3><p>Inscríbete desde tu cuenta. Si el taller está lleno, consulta su lista de espera.</p></article>
-              <article><span className="jw-step-number">03 /</span><span className="jw-step-icon" aria-hidden="true">✳</span><h3>Empieza algo nuevo</h3><p>Guarda la fecha y prepárate para aprender, practicar y compartir.</p></article>
+              <article><span className="jw-step-number">03 /</span><span className="jw-step-icon" aria-hidden="true"><span className="jw-join-mark" aria-hidden="true" /></span><h3>Empieza algo nuevo</h3><p>Guarda la fecha y prepárate para aprender, practicar y compartir.</p></article>
             </div>
           </section>
           <section className="jw-teach"><div><p className="jw-eyebrow">DEL OTRO LADO DE LA MESA</p><h2>Eso que sabes,<br /><em>alguien quiere aprenderlo.</em></h2><p>Crea tu cuenta de instructor y propón tu próximo taller.</p></div><button className="jw-button jw-button-light" onClick={() => navegar('registro', 'instructor')}>¿Quieres publicar talleres? <span aria-hidden="true">↗</span></button></section>
         </>}
         {!iniciando && acceso && <div className="jw-access-layout">
-          <aside className="jw-access-story"><p className="jw-eyebrow">UN ESPACIO PARA LO QUE VIENE</p><h2>{rol === 'instructor' ? <>Tu conocimiento.<br /> Su próximo<br /> <em>descubrimiento.</em></> : <>Qué bueno<br /> que sigas<br /> <em>explorando.</em></>}</h2><p>{rol === 'instructor' ? 'Comparte lo que te apasiona. Tu próximo taller puede ser el comienzo de algo para alguien más.' : 'Vuelve a tus ideas pendientes. Hay algo nuevo esperando a que le hagas un lugar.'}</p><div className="jw-access-art" aria-hidden="true"><span>✳</span><div>nunca dejes<br /><strong>de aprender.</strong></div></div><span className="jw-story-foot">join.a.workshop · El gusto de aprender.</span></aside>
+          <aside className="jw-access-story"><p className="jw-eyebrow">UN ESPACIO PARA LO QUE VIENE</p><h2>{rol === 'instructor' ? <>Tu conocimiento.<br /> Su próximo<br /> <em>descubrimiento.</em></> : <>Qué bueno<br /> que sigas<br /> <em>explorando.</em></>}</h2><p>{rol === 'instructor' ? 'Comparte lo que te apasiona. Tu próximo taller puede ser el comienzo de algo para alguien más.' : 'Vuelve a tus ideas pendientes. Hay algo nuevo esperando a que le hagas un lugar.'}</p><div className="jw-access-art" aria-hidden="true"><span><span className="jw-join-mark" aria-hidden="true" /></span><div>nunca dejes<br /><strong>de aprender.</strong></div></div><span className="jw-story-foot">join.a.workshop · El gusto de aprender.</span></aside>
           <section className="jw-form-panel acceso">
             <button className="jw-back" onClick={() => navegar('inicio')}>← Volver al inicio</button>
             <p className="jw-eyebrow">{pantalla === 'login' ? 'BIENVENIDO DE NUEVO' : 'EMPIEZA POR AQUÍ'}</p>

@@ -248,6 +248,7 @@ def cancelar_inscripcion_api(request):
         mensaje += (
             " La cuenta quedó bloqueada para nuevas inscripciones por acumular "
             f"{LIMITE_CANCELACIONES_CONSECUTIVAS} cancelaciones consecutivas."
+            " También se cancelaron las demás inscripciones y solicitudes en espera."
         )
     return JsonResponse({
         "mensaje": mensaje,

@@ -38,6 +38,7 @@ class ServicioBloqueoTests(SimpleTestCase):
         usuarios = Mock()
         with (
             patch.object(servicios, "_notificar"),
+            patch.object(servicios, "_cancelar_inscripciones_por_bloqueo"),
             patch.object(servicios, "atomic", return_value=nullcontext()),
             patch.object(servicios.Bloqueo, "objects", bloqueos),
             patch.object(servicios.Usuario, "objects", usuarios),

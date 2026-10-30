@@ -66,3 +66,20 @@ def cuenta_simulada():
 
 def test_login_rechaza_contrasena_incorrecta(cuenta_simulada):
     assert CIBackend().authenticate(None, ci="12345678", password="otra") is None
+    factory = RequestFactory()
+    for rol in (Usuario.Rol.PARTICIPANTE, Usuario.Rol.INSTRUCTOR):
+        for seleccionado in (Usuario.Rol.PARTICIPANTE, Usuario.Rol.INSTRUCTOR, "administrador", None):
+            datos = {"ci": "12345678", "contrasena": "Talleres!seguro.742"}
+            if seleccionado is not None:
+                datos["rol"] = seleccionado
+            request = factory.post("/api/cuentas/login/", datos, content_type="application/json")
+            with patch.object(vistas, "authenticate", return_value=cuenta_simulada), \
+                 patch.object(vistas, "perfil_json", return_value={"rol": rol}), \
+                 patch.object(vistas, "login") as abrir:
+                respuesta = vistas.ingresar(request)
+            if seleccionado == rol:
+                assert respuesta.status_code == 200
+                abrir.assert_called_once_with(request, cuenta_simulada)
+            else:
+                assert respuesta.status_code == (403 if seleccionado in ("participante", "instructor") else 400)
+                abrir.assert_not_called()
