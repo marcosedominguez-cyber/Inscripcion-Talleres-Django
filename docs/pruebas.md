@@ -7,7 +7,7 @@ del PR #64, bloqueos y administración del PR #70, y notificaciones del PR #71.
 En esa versión se recogían 240 casos de Python (13 requerían MongoDB) y 30 de
 React: 270 casos entre ambos ejecutores.
 
-La suite actual recoge 90 casos reales. No se conservan pruebas antiguas fuera
+La suite actual recoge 108 casos reales. No se conservan pruebas antiguas fuera
 del recolector para aparentar la reducción. Se retiraron duplicados de las
 mismas reglas, comprobaciones repetidas de estructura y pruebas del prototipo
 en memoria cuyo flujo actual utiliza los servicios Django. Los recorridos de
@@ -15,14 +15,14 @@ registro, inscripción y cancelación pasan a probarse con persistencia real.
 
 | Nivel | Ubicación | Casos | Proporción |
 | --- | --- | ---: | ---: |
-| Unitarias Python | `tests/unitarios/` | 60 | 66,67 % |
-| Unitarias React | `frontend/src/**/*.test.jsx` | 12 | 13,33 % |
-| Integración MongoDB | `tests/integracion/` | 14 | 15,56 % |
-| End to end | `tests/e2e/` | 4 | 4,44 % |
-| Total | Ambos ejecutores | 90 | 100 % |
+| Unitarias Python | `tests/unitarios/` | 69 | 63,89 % |
+| Unitarias React | `frontend/src/**/*.test.jsx` | 12 | 11,11 % |
+| Integración MongoDB | `tests/integracion/` | 23 | 21,30 % |
+| End to end | `tests/e2e/` | 4 | 3,70 % |
+| Total | Ambos ejecutores | 108 | 100 % |
 
-Las 72 unitarias suman el 80 %. El 15 % y el 5 % de 90 dan 13,5 y 4,5;
-se usan 14 y 4 para trabajar con cantidades enteras. Cada fila parametrizada es
+Las 81 unitarias suman el 75 %. La integración aporta 23 casos y los recorridos
+end to end, 4. Cada fila parametrizada es
 un caso independiente, con su propio nombre y resultado. El ejecutor verifica
 los cuatro conteos en los informes JUnit y rechaza resultados con omisiones.
 
@@ -41,6 +41,7 @@ los cuatro conteos en los informes JUnit y rechaza resultados con omisiones.
 | Roles públicos y ausencia de privilegios administrativos | Registro real; unitarias de formularios y privilegios inyectados |
 | Borrados administrativos prohibidos | Seis casos independientes: GET/POST de usuario, taller e inscripción |
 | Auditoría y cambios de aprobación | Unitarias de mensajes y notificación; aprobación administrativa real desde navegador |
+| Transacción individual de talleres en Admin | Nueve pruebas de integración: edición, alta, CSRF, permisos, formulario inválido, sin cambios, rollback por auditoría y anidamiento |
 | Avisos de promoción, edición y bloqueo | Servicios reales con persistencia; lectura, idempotencia, privacidad y paginación |
 | Recuperación de errores del catálogo y de la bandeja | Componentes React con dependencias aisladas y mensajes del servidor conservados |
 | Solicitudes simultáneas | Dos casos de concurrencia real: última plaza y horarios cruzados de la misma persona |
@@ -79,11 +80,11 @@ En Linux puede ser necesario `python -m playwright install --with-deps chromium`
 python scripts/ejecutar_pruebas.py
 ```
 
-Ejecuta las 60 unitarias Python y las 12 de React. Informa **72**, nunca 90.
+Ejecuta las 69 unitarias Python y las 12 de React. Informa **81**, nunca 108.
 Para una comprobación individual se pueden usar `python -m pytest
 tests/unitarios -q` y `npm --prefix frontend test`.
 
-### Las 90 con MongoDB local
+### Las 108 con MongoDB local
 
 Con `mongod` instalado en PATH:
 
@@ -109,7 +110,7 @@ brew install mongodb-community@8.0
 
 No hace falta iniciarlo como servicio; el ejecutor lo prepara para esta ejecución.
 
-### Las 90 contra un entorno de pruebas en Atlas
+### Las 108 contra un entorno de pruebas en Atlas
 
 Se proporciona `MONGODB_TEST_URI` como variable de entorno, usando una cuenta
 autorizada para bases de pruebas y una IP admitida por ese clúster. Después se
@@ -141,8 +142,8 @@ que contiene los nombres de todos los casos ejecutados y sus cantidades. Si
 un recorrido de navegador falla, se guarda captura y traza en `evidencias/e2e/`.
 Esos archivos de ejecución están ignorados por Git y CI los conserva como artefactos.
 
-`python -m pytest -q` con la configuración predeterminada ejecuta solo 60 casos
-Python y omite los 18 que necesitan otro entorno. No cuenta las 12 pruebas React
+`python -m pytest -q` con la configuración predeterminada ejecuta solo 69 casos
+Python y omite los 27 que necesitan otro entorno. No cuenta las 12 pruebas React
 ni acredita la ejecución completa. CI ejecuta `--completa` con MongoDB local y
 Chromium, y detiene el trabajo ante un fallo, una omisión o un conteo diferente.
 

@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.text import capfirst
 
 from talleres.admin_site import admin_site
+from talleres.admin_transacciones import TransaccionMongoChangeFormMixin
 from talleres.models import Bloqueo, Cancelacion, Inscripcion, Taller, Usuario
 from talleres.servicios import (
     BloqueoParticipanteError, actualizar_taller, bloquear_participante, rehabilitar_participante,
@@ -443,7 +444,7 @@ class AprobacionFilter(admin.SimpleListFilter):
 
 
 @admin.register(Taller, site=admin_site)
-class TallerAdmin(AdminSistemaModelAdmin):
+class TallerAdmin(TransaccionMongoChangeFormMixin, AdminSistemaModelAdmin):
     list_display = (
         "codigo", "nombre", "instructor", "estado_aprobacion", "cupos",
         "fecha_inicio", "fecha_fin",
@@ -457,6 +458,8 @@ class TallerAdmin(AdminSistemaModelAdmin):
     def save_model(self, request, obj, form, change):
         if not change:
             return super().save_model(request, obj, form, change)
+        if not form.changed_data:
+            return
         anterior = Taller.objects.get(pk=obj.pk)
         actualizar_taller(anterior, {campo: getattr(obj, campo) for campo in form.changed_data},
                           reenviar_revision=False)

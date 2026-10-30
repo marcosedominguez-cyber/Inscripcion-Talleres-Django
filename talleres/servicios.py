@@ -5,7 +5,7 @@ from functools import wraps
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, IntegrityError
+from django.db import DEFAULT_DB_ALIAS, DatabaseError, IntegrityError, connections
 from django.db.models import F
 from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
@@ -21,6 +21,10 @@ from talleres.reglas import (
 
 class ErrorNegocioTalleres(Exception):
     """Clase base para errores de negocio emitidos por los servicios web."""
+
+
+class TransaccionMongoRequeridaError(RuntimeError):
+    """Un servicio transaccional se invocó dentro de un atomic de Django."""
 
 
 class DatosParticipanteInvalidosError(ErrorNegocioTalleres, ValueError):
@@ -87,13 +91,25 @@ class PlazoCancelacionVencidoError(InscripcionError):
     """El taller ya comenzó y no admite cancelaciones."""
 
 
+def _conexion(alias=DEFAULT_DB_ALIAS):
+    return connections[alias]
+
+
 def transaccion_con_reintentos(funcion):
     """Reintenta transacciones que fallan con una etiqueta transitoria."""
     @wraps(funcion)
     def ejecutar(*args, **kwargs):
+        conexion = _conexion()
+        if getattr(conexion, "in_atomic_block_mongo", False):
+            return funcion(*args, **kwargs)
+        if conexion.in_atomic_block:
+            raise TransaccionMongoRequeridaError(
+                f"{funcion.__qualname__} requiere una transacción MongoDB y no "
+                "puede ejecutarse dentro de transaction.atomic() de Django."
+            )
         for intento in range(5):
             try:
-                with atomic():
+                with atomic(using=DEFAULT_DB_ALIAS):
                     return funcion(*args, **kwargs)
             except DatabaseError as error:
                 causa = error
