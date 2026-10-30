@@ -96,35 +96,23 @@ Ante un conflicto transitorio se vuelve a consultar y validar. Esto impide que
 dos lecturas simultáneas sin confirmaciones permitan después dos horarios
 incompatibles. La promoción también serializa la escritura de su participante.
 
-En respuesta a `sospechoso.pdf`, no se usa una prueba con mocks como evidencia de
-persistencia o concurrencia. Se agregan pruebas reales aisladas en
-`tests/mongodb/test_horarios_plazos.py`, ejecutadas en MongoDB 8.0.17 local con
-replica set. Comprueban rechazo sin escrituras, espera, promoción, límite exacto,
-inscripciones simultáneas y promoción simultánea con otra inscripción.
-Estas pruebas no utilizan Atlas ni los datos del equipo.
+En respuesta a `sospechoso.pdf`, las comprobaciones de persistencia y concurrencia
+se ejecutan con MongoDB real en `tests/integracion/test_flujos.py`. Incluyen el
+cierre exacto, rechazo sin cambios, promoción de personas habilitadas y solicitudes
+simultáneas. Los recorridos de `tests/e2e/test_recorridos.py` verifican además
+React, Django y MongoDB juntos, sin simular sus respuestas.
 
 ## Comprobación reproducible
 
-Con las dependencias del proyecto instaladas:
+La reorganización general mantiene 90 casos en todo el proyecto. El inventario,
+la distribución y la preparación de MongoDB se documentan en [pruebas.md](pruebas.md).
+Desde la raíz, con las dependencias y Chromium instalados:
 
 ```bash
-python -m pytest -q
-cd frontend
-npm ci
-npm test
-npm run build
+python scripts/ejecutar_pruebas.py --completa
 ```
 
-Para la integración real se necesita un MongoDB local en `127.0.0.1:27017`,
-configurado como replica set. La configuración está fijada a una base de pruebas
-local y no carga `.env`. Con esa instancia disponible, desde la raíz:
-
-```bash
-python -m pytest -q tests/mongodb/test_horarios_plazos.py \
-  --ds=config.settings_test_mongodb_local --create-db
-```
-
-La suite normal omite los tests MongoDB por su configuración SQLite aislada;
-ejecutar la suite normal no acredita que la integración MongoDB haya pasado.
-Los resultados de la integración se reportan por separado. La comprobación
-local tampoco certifica conectividad ni configuración del clúster Atlas.
+La ejecución completa utiliza un replica set MongoDB local temporal por defecto.
+Atlas se admite mediante `MONGODB_TEST_URI` de un entorno de pruebas y una base
+nueva generada por el ejecutor. El `.env` de la aplicación no se carga. Las pruebas
+unitarias por sí solas no acreditan persistencia, concurrencia ni conexión a Atlas.

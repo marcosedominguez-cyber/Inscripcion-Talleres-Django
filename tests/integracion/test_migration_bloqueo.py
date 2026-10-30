@@ -1,4 +1,4 @@
-"""Integración de 0008 contra MongoDB local; nunca usar con Atlas."""
+"""Integración de 0008 en una base MongoDB exclusiva de pruebas."""
 
 from datetime import datetime, timezone as dt_timezone
 
@@ -8,33 +8,10 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from pymongo.errors import DuplicateKeyError
 
-_HOSTS_MONGODB_LOCAL = {
-    "mongodb://127.0.0.1:27017",
-    "mongodb://localhost:27017",
-}
-_NOMBRES_DB_LOCAL = {
-    "k1_migration_isolated",
-}
-_CONFIGURACION_LOCAL_SEGURA = (
-    connection.vendor == "mongodb"
-    and connection.settings_dict.get("HOST") in _HOSTS_MONGODB_LOCAL
-    and connection.settings_dict.get("NAME") in _NOMBRES_DB_LOCAL
-)
-
-pytestmark = pytest.mark.skipif(
-    not _CONFIGURACION_LOCAL_SEGURA,
-    reason=(
-        "Requiere --ds=config.settings_test_mongodb_local; se omite antes del "
-        "setup de pytest-django si host/base no son estrictamente locales."
-    ),
-)
-
-
 @pytest.mark.django_db(transaction=True)
 def test_migracion_inicializa_estado_sin_inventar_historial_ni_tocar_cancelaciones(migrar_desde_base_limpia):
     settings = connection.settings_dict
-    assert settings.get("HOST") in _HOSTS_MONGODB_LOCAL
-    assert settings["NAME"] in _NOMBRES_DB_LOCAL
+    assert settings["NAME"].startswith("test_talleres_")
 
     migrar_desde_base_limpia([
         ("talleres", "0007_usuario_cancelaciones_consecutivas_cancelacion"),

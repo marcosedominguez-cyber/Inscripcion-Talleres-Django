@@ -16,9 +16,6 @@ INICIO = datetime(2030, 10, 15, 12, 0, tzinfo=ZoneInfo("America/La_Paz"))
 
 
 @pytest.mark.parametrize("segundos_antes, permitido", [
-    (61, True),
-    (60, True),
-    (59, False),
     (0, False),
     (-1, False),
 ])

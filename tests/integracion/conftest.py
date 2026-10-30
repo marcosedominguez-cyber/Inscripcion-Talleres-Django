@@ -7,10 +7,11 @@ from django.db.migrations.executor import MigrationExecutor
 
 @pytest.fixture
 def migrar_desde_base_limpia(transactional_db):
-    # Solo se elimina el esquema de la base local desechable de estas pruebas.
+    # Solo se elimina el esquema de la base exclusiva de esta ejecución de estas pruebas.
     assert connection.vendor == "mongodb"
-    assert connection.settings_dict["HOST"] == "mongodb://127.0.0.1:27017"
-    assert connection.settings_dict["NAME"] == "k1_migration_isolated"
+    from django.conf import settings
+    assert settings.SETTINGS_MODULE == "config.settings_test_mongodb"
+    assert connection.settings_dict["NAME"].startswith("test_talleres_")
     destinos_actuales = MigrationExecutor(connection).loader.graph.leaf_nodes()
 
     def preparar(destino):

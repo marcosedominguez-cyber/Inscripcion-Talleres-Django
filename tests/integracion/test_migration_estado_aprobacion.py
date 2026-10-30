@@ -1,4 +1,4 @@
-"""Integración de 0003 contra MongoDB local; nunca usar con Atlas."""
+"""Integración de 0003 en una base MongoDB exclusiva de pruebas."""
 
 from datetime import timedelta
 from importlib import import_module
@@ -9,35 +9,11 @@ from django.db import connection
 from django.utils import timezone
 from django.db.migrations.executor import MigrationExecutor
 
-_HOSTS_MONGODB_LOCAL = {
-    "mongodb://127.0.0.1:27017",
-    "mongodb://localhost:27017",
-}
-_NOMBRES_DB_LOCAL = {
-    "k1_migration_isolated",
-}
-_CONFIGURACION_LOCAL_SEGURA = (
-    connection.vendor == "mongodb"
-    and connection.settings_dict.get("HOST") in _HOSTS_MONGODB_LOCAL
-    and connection.settings_dict.get("NAME") in _NOMBRES_DB_LOCAL
-)
-
-pytestmark = pytest.mark.skipif(
-    not _CONFIGURACION_LOCAL_SEGURA,
-    reason=(
-        "Requiere --ds=config.settings_test_mongodb_local; se omite antes del "
-        "setup de pytest-django si host/base no son estrictamente locales."
-    ),
-)
-
-
 @pytest.mark.django_db(transaction=True)
 def test_migracion_rellena_solo_ausentes_es_repetible_y_filtra_catalogo(migrar_desde_base_limpia):
     # Segunda barrera: incluso con settings equivocados, abortar antes de tocar datos.
     settings = connection.settings_dict
-    host = settings.get("HOST", "")
-    assert host in _HOSTS_MONGODB_LOCAL
-    assert settings["NAME"] in _NOMBRES_DB_LOCAL
+    assert settings["NAME"].startswith("test_talleres_")
 
     destino_previo = [("talleres", "0002_usuario_cuentas")]
     migrar_desde_base_limpia(destino_previo)
