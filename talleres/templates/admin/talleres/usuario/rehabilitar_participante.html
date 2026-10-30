@@ -1,0 +1,21 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p>
+    Se cerrará el episodio de bloqueo activo y se registrará la fecha y el
+    administrador responsable. El historial de bloqueos se conservará.
+</p>
+
+<form method="post" action="{{ form_action }}">
+    {% csrf_token %}
+    <h2>Participante</h2>
+    <ul>
+        <li>{{ participante }}</li>
+    </ul>
+
+    <div class="submit-row">
+        <input type="submit" value="Confirmar rehabilitación" class="default">
+        <a href="{{ cancel_url }}" class="button cancel-link">Cancelar</a>
+    </div>
+</form>
+{% endblock %}

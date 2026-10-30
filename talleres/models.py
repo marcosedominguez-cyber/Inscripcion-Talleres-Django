@@ -4,6 +4,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django_mongodb_backend.fields import ObjectIdAutoField
 
 from talleres.reglas import CUPO_MAXIMO, CUPO_MINIMO, error_duracion
@@ -24,6 +25,7 @@ class Usuario(models.Model):
     )
     rol = models.CharField(max_length=20, choices=Rol.choices, default=Rol.PARTICIPANTE)
     cancelaciones_consecutivas = models.PositiveIntegerField(default=0)
+    bloqueado = models.BooleanField("bloqueado", default=False)
 
     class Meta:
         db_table = "participantes"
@@ -32,9 +34,11 @@ class Usuario(models.Model):
     @classmethod
     def from_db(cls, db, field_names, values):
         usuario = super().from_db(db, field_names, values)
-        # Los documentos anteriores al bloqueo no tienen el contador.
+        # Los documentos anteriores al bloqueo no tienen los campos nuevos.
         if usuario.cancelaciones_consecutivas is None:
             usuario.cancelaciones_consecutivas = 0
+        if usuario.bloqueado is None:
+            usuario.bloqueado = False
         return usuario
 
     def clean(self):
@@ -173,6 +177,94 @@ class Cancelacion(models.Model):
 
     def __str__(self):
         return f"{self.participante_id} -> {self.codigo_taller} ({self.estado_anterior})"
+
+
+class Bloqueo(models.Model):
+    """Episodio de bloqueo de un participante, abierto o ya rehabilitado."""
+
+    class Motivo(models.TextChoices):
+        CANCELACIONES_CONSECUTIVAS = (
+            "cancelaciones_consecutivas", "Cancelaciones consecutivas"
+        )
+        CONDUCTA_INAPROPIADA = "conducta_inapropiada", "Conducta inapropiada"
+        INCUMPLIMIENTO_NORMAS = (
+            "incumplimiento_normas", "Incumplimiento de normas"
+        )
+        SOLICITUD_PARTICIPANTE = (
+            "solicitud_participante", "Solicitud del participante"
+        )
+        MANUAL = "manual", "Otro motivo administrativo"
+
+    id = ObjectIdAutoField(primary_key=True)
+    participante = models.ForeignKey(
+        Usuario, on_delete=models.PROTECT, related_name="bloqueos",
+        limit_choices_to={"rol": Usuario.Rol.PARTICIPANTE},
+    )
+    motivo = models.CharField(max_length=40, choices=Motivo.choices)
+    fecha_bloqueo = models.DateTimeField(default=timezone.now)
+    bloqueado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="bloqueos_realizados", null=True, blank=True,
+        db_column="bloqueado_por",
+    )
+    fecha_desbloqueo = models.DateTimeField(null=True, blank=True)
+    desbloqueado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="bloqueos_rehabilitados", null=True, blank=True,
+        db_column="desbloqueado_por",
+    )
+
+    class Meta:
+        db_table = "bloqueos"
+        ordering = ["-fecha_bloqueo", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["participante", "fecha_desbloqueo"],
+                name="bloqueo_abierto_unico",
+                nulls_distinct=False,
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["participante", "fecha_bloqueo"],
+                name="bloqueos_participante_fecha",
+            )
+        ]
+
+    @classmethod
+    def motivos_manuales(cls):
+        return tuple(
+            choice for choice in cls.Motivo.choices
+            if choice[0] != cls.Motivo.CANCELACIONES_CONSECUTIVAS
+        )
+
+    def clean(self):
+        super().clean()
+        errores = {}
+        if (
+            self.participante_id
+            and self.participante.rol != Usuario.Rol.PARTICIPANTE
+        ):
+            errores["participante"] = "El bloqueo solo aplica a participantes."
+        if self.motivo == self.Motivo.CANCELACIONES_CONSECUTIVAS:
+            if self.bloqueado_por_id is not None:
+                errores["bloqueado_por"] = (
+                    "Un bloqueo automático no debe tener administrador responsable."
+                )
+        elif self.bloqueado_por_id is None:
+            errores["bloqueado_por"] = (
+                "Un bloqueo manual debe registrar al administrador responsable."
+            )
+        if (self.fecha_desbloqueo is None) != (self.desbloqueado_por_id is None):
+            errores["fecha_desbloqueo"] = (
+                "La fecha y el administrador de desbloqueo deben registrarse juntos."
+            )
+        if errores:
+            raise ValidationError(errores)
+
+    def __str__(self):
+        estado = "activo" if self.fecha_desbloqueo is None else "rehabilitado"
+        return f"{self.participante_id} - {self.get_motivo_display()} ({estado})"
 
 
 class Contador(models.Model):

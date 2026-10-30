@@ -4,7 +4,7 @@ import json
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone as dt_timezone
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.middleware.csrf import CsrfViewMiddleware
@@ -12,7 +12,7 @@ from django.test import RequestFactory, SimpleTestCase
 
 from talleres import servicios
 from talleres.api_participantes import cancelar_inscripcion_api, inscripcion_participante_api
-from talleres.models import Inscripcion, Taller, Usuario
+from talleres.models import Bloqueo, Inscripcion, Taller, Usuario
 
 
 class ServicioCancelacionTests(SimpleTestCase):
@@ -51,12 +51,16 @@ class ServicioCancelacionTests(SimpleTestCase):
         inscripciones.filter.return_value.order_by.return_value.first.return_value = siguiente
         cancelaciones_manager = Mock()
         cancelaciones_manager.create.return_value = cancelacion
+        bloqueos = Mock()
+        bloqueos.filter.return_value.order_by.return_value.first.return_value = None
+        bloqueos.create.return_value = SimpleNamespace(pk="bloqueo-id")
         with (
             patch.object(servicios, "atomic", return_value=nullcontext()),
             patch.object(servicios.Usuario, "objects", usuarios),
             patch.object(servicios.Taller, "objects", talleres),
             patch.object(servicios.Inscripcion, "objects", inscripciones),
             patch.object(servicios.Cancelacion, "objects", cancelaciones_manager),
+            patch.object(servicios.Bloqueo, "objects", bloqueos),
             patch.object(servicios.timezone, "now", return_value=ahora or self.ahora),
         ):
             resultado = servicios.cancelar_inscripcion("12345678", "T-001")
@@ -66,6 +70,7 @@ class ServicioCancelacionTests(SimpleTestCase):
             "usuarios": usuarios, "talleres": talleres,
             "inscripciones": inscripciones,
             "cancelaciones": cancelaciones_manager,
+            "bloqueos": bloqueos,
         }
 
     def test_confirma_cancelacion_conserva_antecedente_y_promueve(self):
@@ -95,11 +100,20 @@ class ServicioCancelacionTests(SimpleTestCase):
             Inscripcion.Estado.EN_ESPERA,
         )
 
-    def test_tercera_cancelacion_bloquea_la_cuenta(self):
-        resultado, _ = self.ejecutar(cancelaciones=2)
+    def test_tercera_cancelacion_bloquea_y_abre_episodio_automatico(self):
+        resultado, mocks = self.ejecutar(cancelaciones=2)
 
         self.assertEqual(resultado.cancelaciones_consecutivas, 3)
         self.assertTrue(resultado.cuenta_bloqueada)
+        mocks["bloqueos"].create.assert_called_once()
+        kwargs = mocks["bloqueos"].create.call_args.kwargs
+        self.assertEqual(kwargs["motivo"], Bloqueo.Motivo.CANCELACIONES_CONSECUTIVAS)
+        self.assertIsNone(kwargs["bloqueado_por"])
+        self.assertTrue(kwargs["participante"].bloqueado)
+        self.assertIn(
+            call(bloqueado=True),
+            mocks["usuarios"].filter.return_value.update.call_args_list,
+        )
 
     def test_no_permite_cancelar_si_el_taller_ya_inicio(self):
         with self.assertRaises(servicios.PlazoCancelacionVencidoError):
@@ -147,6 +161,18 @@ class BloqueoInscripcionTests(SimpleTestCase):
                 servicios.inscribir_participante("123", "T-001")
         talleres.get.assert_not_called()
         inscripciones.create.assert_not_called()
+
+    def test_bloqueo_manual_impide_inscripcion_aunque_el_contador_sea_cero(self):
+        participante = SimpleNamespace(
+            pk="participante-id", cancelaciones_consecutivas=0, bloqueado=True,
+        )
+        with patch.object(servicios, "atomic", return_value=nullcontext()), \
+             patch.object(servicios.Usuario, "objects") as usuarios, \
+             patch.object(servicios.Taller, "objects") as talleres:
+            usuarios.get.return_value = participante
+            with self.assertRaises(servicios.CuentaBloqueadaError):
+                servicios.solicitar_espera("123", "T-001")
+        talleres.get.assert_not_called()
 
 
 class ApiCancelacionTests(SimpleTestCase):
