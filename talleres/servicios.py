@@ -10,7 +10,7 @@ from django.utils import timezone
 from django_mongodb_backend.transaction import atomic
 
 from talleres.consultas import buscar_superposicion, cupos_disponibles, consultar_espera
-from talleres.models import Cancelacion, Contador, Inscripcion, Usuario, Taller
+from talleres.models import Bloqueo, Cancelacion, Contador, Inscripcion, Usuario, Taller
 from talleres.reglas import (
     LIMITE_CANCELACIONES_CONSECUTIVAS, cancelacion_abierta,
     cuenta_bloqueada_para_inscripciones, inscripcion_abierta, limite_espera,
@@ -59,7 +59,23 @@ class SuperposicionHorariaError(InscripcionError):
 
 
 class CuentaBloqueadaError(InscripcionError):
-    """La cuenta acumuló el límite de cancelaciones consecutivas."""
+    """La cuenta está bloqueada para nuevas inscripciones."""
+
+
+class BloqueoParticipanteError(ErrorNegocioTalleres):
+    """Error base de las operaciones administrativas de bloqueo."""
+
+
+class ParticipanteYaBloqueadoError(BloqueoParticipanteError):
+    """El participante ya tiene un bloqueo vigente."""
+
+
+class ParticipanteNoBloqueadoError(BloqueoParticipanteError):
+    """El participante no tiene un bloqueo que pueda rehabilitarse."""
+
+
+class MotivoBloqueoInvalidoError(BloqueoParticipanteError, ValueError):
+    """El motivo no corresponde al origen automático o manual del bloqueo."""
 
 
 class InscripcionNoEncontradaError(InscripcionError, LookupError):
@@ -120,6 +136,129 @@ def registrar_participante(nombre, ci):
 def _guardar_participante(participante):
     participante.save()
     return participante
+
+
+def esta_bloqueado(participante):
+    """Estado efectivo compartido por inscripción, espera y API."""
+    return cuenta_bloqueada_para_inscripciones(
+        getattr(participante, "cancelaciones_consecutivas", 0),
+        bloqueado=bool(getattr(participante, "bloqueado", False)),
+    )
+
+
+def _validar_participante_para_bloqueo(participante):
+    if getattr(participante, "rol", None) != Usuario.Rol.PARTICIPANTE:
+        raise MotivoBloqueoInvalidoError(
+            "Solo se puede bloquear o rehabilitar a un participante."
+        )
+
+
+def _bloqueo_abierto(participante):
+    return Bloqueo.objects.filter(
+        participante_id=participante.pk,
+        fecha_desbloqueo__isnull=True,
+    ).order_by("fecha_bloqueo", "id").first()
+
+
+def _marcar_bloqueado(participante):
+    Usuario.objects.filter(pk=participante.pk).update(bloqueado=True)
+    participante.bloqueado = True
+
+
+def _abrir_bloqueo(participante, motivo, administrador=None, *, reutilizar=False):
+    abierto = _bloqueo_abierto(participante)
+    if abierto is not None:
+        if reutilizar:
+            _marcar_bloqueado(participante)
+            return abierto
+        raise ParticipanteYaBloqueadoError(
+            "El participante ya tiene un bloqueo vigente."
+        )
+    if getattr(participante, "bloqueado", False) and not reutilizar:
+        raise ParticipanteYaBloqueadoError(
+            "El participante ya está marcado como bloqueado."
+        )
+    try:
+        bloqueo = Bloqueo.objects.create(
+            participante=participante,
+            motivo=motivo,
+            bloqueado_por=administrador,
+        )
+    except IntegrityError:
+        if reutilizar:
+            raise ParticipanteYaBloqueadoError(
+                "Otro proceso abrió un bloqueo para el participante."
+            ) from None
+        raise ParticipanteYaBloqueadoError(
+            "El participante ya tiene un bloqueo vigente."
+        ) from None
+    _marcar_bloqueado(participante)
+    return bloqueo
+
+
+def bloquear_participante(participante, motivo, administrador=None):
+    """Abre un episodio manual y actualiza el estado del participante."""
+    _validar_participante_para_bloqueo(participante)
+    if administrador is None:
+        if motivo != Bloqueo.Motivo.CANCELACIONES_CONSECUTIVAS:
+            raise MotivoBloqueoInvalidoError(
+                "Solo el sistema puede registrar un bloqueo automático."
+            )
+    elif motivo not in dict(Bloqueo.motivos_manuales()):
+        raise MotivoBloqueoInvalidoError("Selecciona un motivo de bloqueo válido.")
+    if esta_bloqueado(participante):
+        raise ParticipanteYaBloqueadoError(
+            "El participante ya tiene un bloqueo vigente."
+        )
+    return _bloquear_transaccion(participante, motivo, administrador)
+
+
+@transaccion_con_reintentos
+def _bloquear_transaccion(participante, motivo, administrador):
+    return _abrir_bloqueo(participante, motivo, administrador)
+
+
+def rehabilitar_participante(participante, administrador):
+    """Cierra el episodio abierto y habilita de nuevo al participante."""
+    if administrador is None:
+        raise MotivoBloqueoInvalidoError(
+            "La rehabilitación debe registrar al administrador responsable."
+        )
+    _validar_participante_para_bloqueo(participante)
+    return _rehabilitar_transaccion(participante, administrador)
+
+
+@transaccion_con_reintentos
+def _rehabilitar_transaccion(participante, administrador):
+    abierto = _bloqueo_abierto(participante)
+    total = getattr(participante, "cancelaciones_consecutivas", 0) or 0
+    if (
+        abierto is None
+        and not getattr(participante, "bloqueado", False)
+        and total < LIMITE_CANCELACIONES_CONSECUTIVAS
+    ):
+        raise ParticipanteNoBloqueadoError(
+            "El participante no tiene un bloqueo vigente."
+        )
+
+    ahora = timezone.now()
+    if abierto is not None:
+        abierto.fecha_desbloqueo = ahora
+        abierto.desbloqueado_por = administrador
+        abierto.save(update_fields=["fecha_desbloqueo", "desbloqueado_por"])
+
+    # El contador mide el ciclo disciplinario vigente. Al rehabilitar un
+    # bloqueo por límite se inicia un ciclo nuevo; sin este reinicio el
+    # participante quedaría habilitado y bloqueado a la vez por la regla
+    # histórica. Los antecedentes siguen en Cancelacion y Bloqueo.
+    campos = {"bloqueado": False}
+    if total >= LIMITE_CANCELACIONES_CONSECUTIVAS:
+        campos["cancelaciones_consecutivas"] = 0
+    Usuario.objects.filter(pk=participante.pk).update(**campos)
+    participante.bloqueado = False
+    if "cancelaciones_consecutivas" in campos:
+        participante.cancelaciones_consecutivas = 0
+    return abierto
 
 
 @transaccion_con_reintentos
@@ -239,12 +378,10 @@ def _registrar_solicitud(ci, codigo_taller, *, espera):
         raise ParticipanteNoEncontradoError(
             f"No existe un participante con la CI {ci!r}."
         ) from None
-    if cuenta_bloqueada_para_inscripciones(
-        getattr(participante, "cancelaciones_consecutivas", 0)
-    ):
+    if esta_bloqueado(participante):
         raise CuentaBloqueadaError(
-            "La cuenta está bloqueada para nuevas inscripciones por acumular "
-            f"{LIMITE_CANCELACIONES_CONSECUTIVAS} cancelaciones consecutivas."
+            "La cuenta está bloqueada para nuevas inscripciones y solicitudes "
+            "de lista de espera."
         )
     try:
         taller = Taller.objects.get(codigo=codigo_taller)
@@ -298,7 +435,7 @@ def _promover_desde_espera(taller):
     motivo = None
     for solicitud in consultar_espera(taller):
         participante = solicitud.participante
-        if cuenta_bloqueada_para_inscripciones(participante.cancelaciones_consecutivas):
+        if esta_bloqueado(participante):
             motivo = "Las solicitudes en espera no cumplen las reglas de inscripción."
             continue
         try:
@@ -317,7 +454,7 @@ def _promover_desde_espera(taller):
 def cancelar_inscripcion(ci, codigo_taller):
     """Cancela una inscripción activa y conserva su antecedente.
 
-    La plaza liberada se asigna a la primera persona en espera. La operación
+    La plaza liberada se asigna a la primera persona habilitada en espera. La operación
     devuelve la cancelación registrada y deja en ella si hubo promoción.
     """
     try:
@@ -366,6 +503,12 @@ def cancelar_inscripcion(ci, codigo_taller):
         getattr(participante, "cancelaciones_consecutivas", 0) or 0
     ) + 1
     participante.cancelaciones_consecutivas = total_cancelaciones
+    if total_cancelaciones >= LIMITE_CANCELACIONES_CONSECUTIVAS:
+        _abrir_bloqueo(
+            participante,
+            Bloqueo.Motivo.CANCELACIONES_CONSECUTIVAS,
+            reutilizar=True,
+        )
     inscripcion.delete()
 
     promovido = None
@@ -376,7 +519,5 @@ def cancelar_inscripcion(ci, codigo_taller):
     cancelacion.promovido = promovido is not None
     cancelacion.motivo_sin_promocion = motivo_sin_promocion
     cancelacion.cancelaciones_consecutivas = total_cancelaciones
-    cancelacion.cuenta_bloqueada = cuenta_bloqueada_para_inscripciones(
-        total_cancelaciones
-    )
+    cancelacion.cuenta_bloqueada = esta_bloqueado(participante)
     return cancelacion

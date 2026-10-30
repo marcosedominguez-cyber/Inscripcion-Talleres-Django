@@ -325,24 +325,20 @@ class AprobacionYCatalogoTests(SimpleTestCase):
             )
             self.assertEqual(admin_site.has_permission(request), esperado)
 
-    def test_solo_propuestas_pendientes_se_aprueban_o_rechazan(self):
+    def test_acciones_de_talleres_delegan_en_el_cambio_auditado(self):
         admin = TallerAdmin(Taller, admin_site)
         queryset = Mock()
-        pendientes = Mock()
-        queryset.filter.return_value = pendientes
         request = SimpleNamespace()
-        with patch.object(admin, "message_user"):
+        with patch.object(admin, "_cambiar_estado_talleres") as cambiar:
             admin.aprobar_seleccionados(request, queryset)
-            queryset.filter.assert_called_once()
-            pendientes.update.assert_called_once_with(
-                estado_aprobacion=Taller.Aprobacion.APROBADO
+            cambiar.assert_called_once_with(
+                request, queryset, Taller.Aprobacion.APROBADO, "aprobados",
             )
-            queryset.filter.reset_mock()
-            pendientes.update.reset_mock()
+            cambiar.reset_mock()
             admin.rechazar_seleccionados(request, queryset)
-        pendientes.update.assert_called_once_with(
-            estado_aprobacion=Taller.Aprobacion.RECHAZADO
-        )
+            cambiar.assert_called_once_with(
+                request, queryset, Taller.Aprobacion.RECHAZADO, "rechazados",
+            )
 
 
 class ConsultaGestionEsperaTests(SimpleTestCase):

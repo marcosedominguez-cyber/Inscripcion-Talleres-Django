@@ -7,6 +7,7 @@ from threading import Barrier, local
 from unittest.mock import patch
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.db import connection, connections
 from django.utils import timezone
 from django.test import RequestFactory
@@ -15,7 +16,7 @@ from types import SimpleNamespace
 from talleres import servicios
 from talleres.api_participantes import inscripcion_participante_api
 from talleres.consultas import consultar_espera, listar_talleres_proximos
-from talleres.models import Cancelacion, Inscripcion, Taller, Usuario
+from talleres.models import Bloqueo, Cancelacion, Inscripcion, Taller, Usuario
 
 
 LOCAL_SEGURO = (
@@ -91,7 +92,8 @@ def test_espera_rechaza_cruce_con_una_confirmacion(datos):
     assert servicios.cupos_disponibles(lleno) == 0
 
 
-def test_promocion_conserva_fifo_entre_habilitados_y_no_confirma_cruces(datos):
+@pytest.mark.parametrize("motivo", ["superposicion", "bloqueo_manual"])
+def test_promocion_conserva_fifo_entre_habilitados_y_no_confirma_cruces(datos, motivo):
     inicio, persona, taller = datos
     destino = taller("Espera", cupos=10)
     titulares = [persona() for _ in range(destino.cupos)]
@@ -100,9 +102,17 @@ def test_promocion_conserva_fifo_entre_habilitados_y_no_confirma_cruces(datos):
     incompatible, habilitado = persona(), persona()
     servicios.solicitar_espera(incompatible.ci, destino.codigo)
     servicios.solicitar_espera(habilitado.ci, destino.codigo)
-    otro = taller("Otro", inicio + timedelta(days=1))
-    # Estar en espera no equivale a una confirmación en el primer taller.
-    servicios.inscribir_participante(incompatible.ci, otro.codigo)
+    if motivo == "bloqueo_manual":
+        administrador = get_user_model().objects.create(username="admin-prueba")
+        servicios.bloquear_participante(
+            incompatible, Bloqueo.Motivo.MANUAL, administrador=administrador,
+        )
+        incompatible.refresh_from_db()
+        assert incompatible.bloqueado and incompatible.cancelaciones_consecutivas == 0
+    else:
+        otro = taller("Otro", inicio + timedelta(days=1))
+        # Estar en espera no equivale a una confirmación en el primer taller.
+        servicios.inscribir_participante(incompatible.ci, otro.codigo)
     resultado = servicios.cancelar_inscripcion(titulares[0].ci, destino.codigo)
     assert resultado.promovido
     assert Inscripcion.objects.get(participante=habilitado, taller=destino).estado == "confirmada"

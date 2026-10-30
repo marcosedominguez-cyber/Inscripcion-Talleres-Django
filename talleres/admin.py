@@ -1,15 +1,140 @@
+import json
+from datetime import date, datetime
+
 from django.contrib import admin, messages
+from django.core.exceptions import FieldDoesNotExist, PermissionDenied
+from django.db import models
 from django.db.models import Q
+from django.http import Http404, HttpResponseRedirect
+from django.shortcuts import render
+from django.urls import path, reverse
+from django.utils import timezone
+from django.utils.text import capfirst
 
 from talleres.admin_site import admin_site
-from talleres.models import Cancelacion, Inscripcion, Taller, Usuario
+from talleres.models import Bloqueo, Cancelacion, Inscripcion, Taller, Usuario
+from talleres.servicios import (
+    BloqueoParticipanteError, bloquear_participante, rehabilitar_participante,
+)
+
+_VALOR_AUSENTE = object()
+_LONGITUD_MAXIMA_AUDITORIA = 80
+_CAMPOS_SENSIBLES_AUDITORIA = frozenset({
+    "password", "contrasena", "contraseña", "token", "secret", "api_key",
+    "ci", "cuenta",
+})
 
 
 class AdminSistemaModelAdmin(admin.ModelAdmin):
     """El sitio ya valida staff + rol; cada modelo repite el rol al autorizar."""
 
+    etiquetas_auditoria = {}
+    campos_sensibles_auditoria = _CAMPOS_SENSIBLES_AUDITORIA
+    longitud_maxima_auditoria = _LONGITUD_MAXIMA_AUDITORIA
+
     def _autorizado(self, request):
         return admin_site.has_permission(request)
+
+    def construct_change_message(self, request, form, formsets, add=False):
+        mensaje = super().construct_change_message(request, form, formsets, add)
+        if add or not form.changed_data:
+            return mensaje
+
+        resumenes = [
+            self._resumen_campo_formulario(form, nombre)
+            for nombre in form.changed_data
+        ]
+        for entrada in mensaje:
+            if "changed" in entrada and "name" not in entrada["changed"]:
+                entrada["changed"]["fields"] = resumenes
+                break
+        else:
+            mensaje.append({"changed": {"fields": resumenes}})
+        return mensaje
+
+    def log_change(self, request, obj, message):
+        if isinstance(message, list):
+            message = json.dumps(message, ensure_ascii=False)
+        return super().log_change(request, obj, message)
+
+    def _resumen_campo_formulario(self, form, nombre):
+        etiqueta = self._etiqueta_campo(nombre, form=form)
+        if nombre in self.campos_sensibles_auditoria:
+            return f"{etiqueta}: valor sensible modificado"
+        return self._resumen_cambio(
+            etiqueta,
+            form.initial.get(nombre, _VALOR_AUSENTE),
+            form.cleaned_data.get(nombre, _VALOR_AUSENTE),
+            self._campo_modelo(form, nombre),
+        )
+
+    def _campo_modelo(self, form, nombre):
+        try:
+            return form._meta.model._meta.get_field(nombre)
+        except (AttributeError, FieldDoesNotExist):
+            return None
+
+    def _etiqueta_campo(self, nombre, *, form=None, modelo=None):
+        if nombre in self.etiquetas_auditoria:
+            return self.etiquetas_auditoria[nombre]
+        if form is not None:
+            try:
+                etiqueta = form.fields[nombre].label
+            except (AttributeError, KeyError):
+                etiqueta = None
+            if etiqueta:
+                return capfirst(str(etiqueta))
+        try:
+            modelo = modelo or self.model
+            return capfirst(str(modelo._meta.get_field(nombre).verbose_name))
+        except (AttributeError, FieldDoesNotExist):
+            return capfirst(nombre)
+
+    def _resumen_cambio(self, etiqueta, anterior, nuevo, campo=None):
+        return (
+            f"{etiqueta}: {self._valor_legible(anterior, campo)}"
+            f" → {self._valor_legible(nuevo, campo)}"
+        )
+
+    def _valor_legible(self, valor, campo=None):
+        if valor is _VALOR_AUSENTE:
+            return "desconocido"
+        if valor is None:
+            return "vacío"
+        if isinstance(valor, bool):
+            return "sí" if valor else "no"
+        if isinstance(valor, datetime):
+            if timezone.is_aware(valor):
+                valor = timezone.localtime(valor)
+            return self._truncar(valor.strftime("%d/%m/%Y %H:%M"))
+        if isinstance(valor, date):
+            return self._truncar(valor.strftime("%d/%m/%Y"))
+        if campo is not None and isinstance(campo, models.ForeignKey):
+            if isinstance(valor, models.Model):
+                valor = valor.pk
+            return self._truncar(str(valor))
+        if isinstance(valor, models.QuerySet):
+            valor = list(valor)
+        if isinstance(valor, (list, tuple, set)):
+            return self._truncar(", ".join(
+                str(elemento.pk if isinstance(elemento, models.Model) else elemento)
+                for elemento in valor
+            ))
+        if campo is not None:
+            opciones = getattr(campo, "flatchoices", None)
+            if opciones and not isinstance(valor, str):
+                etiqueta = dict(opciones).get(valor)
+                if etiqueta is not None:
+                    return self._truncar(str(etiqueta))
+        if isinstance(valor, models.Model):
+            return self._truncar(str(valor))
+        return self._truncar(str(valor))
+
+    def _truncar(self, texto):
+        limite = self.longitud_maxima_auditoria
+        if limite and len(texto) > limite:
+            return f"{texto[:limite - 1]}…"
+        return texto
 
     def has_module_permission(self, request):
         return self._autorizado(request)
@@ -29,19 +154,271 @@ class AdminSistemaModelAdmin(admin.ModelAdmin):
 
 @admin.register(Usuario, site=admin_site)
 class UsuarioAdmin(AdminSistemaModelAdmin):
-    list_display = ("nombre", "ci", "rol", "cuenta", "cancelaciones_consecutivas")
-    list_filter = ("rol",)
+    list_display = (
+        "nombre", "ci", "rol", "bloqueado", "cuenta",
+        "cancelaciones_consecutivas",
+    )
+    list_filter = ("rol", "bloqueado")
     search_fields = ("nombre", "ci", "cuenta__username")
     list_select_related = ("cuenta",)
-    actions = ("rehabilitar_inscripciones",)
+    readonly_fields = ("bloqueado",)
+    actions = ("bloquear_participantes", "rehabilitar_participantes")
+    change_form_template = "admin/talleres/usuario/change_form.html"
+    bloquear_participantes_template = (
+        "admin/talleres/usuario/bloquear_participantes.html"
+    )
+    rehabilitar_participante_template = (
+        "admin/talleres/usuario/rehabilitar_participante.html"
+    )
 
-    @admin.action(description="Rehabilitar inscripciones (reiniciar cancelaciones)")
-    def rehabilitar_inscripciones(self, request, queryset):
-        actualizados = queryset.update(cancelaciones_consecutivas=0)
-        self.message_user(
-            request, f"{actualizados} cuenta(s) habilitadas para inscribirse.",
-            messages.SUCCESS,
+    def get_urls(self):
+        return [
+            path(
+                "<path:object_id>/bloquear/",
+                self.admin_site.admin_view(self._vista_bloquear),
+                name="talleres_usuario_bloquear",
+            ),
+            path(
+                "<path:object_id>/rehabilitar/",
+                self.admin_site.admin_view(self._vista_rehabilitar),
+                name="talleres_usuario_rehabilitar",
+            ),
+        ] + super().get_urls()
+
+    def _url_cambio(self, participante):
+        return reverse(
+            f"{self.admin_site.name}:talleres_usuario_change",
+            args=[str(participante.pk)],
         )
+
+    def _url_listado(self):
+        return reverse(f"{self.admin_site.name}:talleres_usuario_changelist")
+
+    def _participante_accion(self, request, object_id):
+        if not self._autorizado(request):
+            raise PermissionDenied
+        participante = self.get_object(request, object_id)
+        if participante is None:
+            raise Http404("El participante no existe.")
+        if not self.has_change_permission(request, participante):
+            raise PermissionDenied
+        if participante.rol != Usuario.Rol.PARTICIPANTE:
+            raise Http404("El usuario indicado no es un participante.")
+        return participante
+
+    def _contexto_bloqueo(
+        self, request, participantes, *, individual, motivo=None,
+    ):
+        if individual:
+            participante = participantes[0]
+            title = "Bloquear participante"
+            explicacion = (
+                "Se abrirá un episodio de bloqueo para el participante "
+                "seleccionado. Las inscripciones ya confirmadas se conservan."
+            )
+            form_action = reverse(
+                f"{self.admin_site.name}:talleres_usuario_bloquear",
+                args=[str(participante.pk)],
+            )
+            cancel_url = self._url_cambio(participante)
+        else:
+            title = "Bloquear participantes"
+            explicacion = (
+                "Se abrirá un episodio de bloqueo para cada participante "
+                "seleccionado. Las inscripciones ya confirmadas se conservan."
+            )
+            form_action = ""
+            cancel_url = self._url_listado()
+        return {
+            **self.admin_site.each_context(request),
+            "title": title,
+            "opts": self.model._meta,
+            "participantes": participantes,
+            "motivos": Bloqueo.motivos_manuales(),
+            "motivo_seleccionado": motivo,
+            "accion_masiva": not individual,
+            "form_action": form_action,
+            "cancel_url": cancel_url,
+            "explicacion": explicacion,
+        }
+
+    def _formulario_bloqueo(self, request, queryset):
+        return render(
+            request,
+            self.bloquear_participantes_template,
+            self._contexto_bloqueo(
+                request, list(queryset), individual=False,
+            ),
+        )
+
+    def _contexto_rehabilitacion(self, request, participante):
+        return {
+            **self.admin_site.each_context(request),
+            "title": "Rehabilitar participante",
+            "opts": self.model._meta,
+            "participante": participante,
+            "form_action": reverse(
+                f"{self.admin_site.name}:talleres_usuario_rehabilitar",
+                args=[str(participante.pk)],
+            ),
+            "cancel_url": self._url_cambio(participante),
+        }
+
+    def _vista_bloquear(self, request, object_id):
+        participante = self._participante_accion(request, object_id)
+        if request.method == "POST":
+            motivo = request.POST.get("motivo")
+            if motivo not in dict(Bloqueo.motivos_manuales()):
+                self.message_user(
+                    request, "Selecciona un motivo de bloqueo válido.",
+                    messages.ERROR,
+                )
+                return render(
+                    request,
+                    self.bloquear_participantes_template,
+                    self._contexto_bloqueo(
+                        request, [participante], individual=True, motivo=motivo,
+                    ),
+                )
+            try:
+                bloquear_participante(
+                    participante, motivo, administrador=request.user,
+                )
+            except BloqueoParticipanteError as error:
+                self.message_user(request, str(error), messages.ERROR)
+            else:
+                self.message_user(
+                    request,
+                    f"{participante} fue bloqueado.",
+                    messages.SUCCESS,
+                )
+            return HttpResponseRedirect(self._url_cambio(participante))
+        return render(
+            request,
+            self.bloquear_participantes_template,
+            self._contexto_bloqueo(
+                request, [participante], individual=True,
+            ),
+        )
+
+    def _vista_rehabilitar(self, request, object_id):
+        participante = self._participante_accion(request, object_id)
+        if request.method == "POST":
+            try:
+                rehabilitar_participante(participante, request.user)
+            except BloqueoParticipanteError as error:
+                self.message_user(request, str(error), messages.ERROR)
+            else:
+                self.message_user(
+                    request,
+                    f"{participante} fue rehabilitado.",
+                    messages.SUCCESS,
+                )
+            return HttpResponseRedirect(self._url_cambio(participante))
+        return render(
+            request,
+            self.rehabilitar_participante_template,
+            self._contexto_rehabilitacion(request, participante),
+        )
+
+    def _resultado_accion(self, request, accion, exitosos, errores):
+        if exitosos:
+            self.message_user(
+                request,
+                f"{exitosos} participante(s) {accion}.",
+                messages.SUCCESS,
+            )
+        if errores:
+            self.message_user(
+                request,
+                "No se pudieron procesar: " + "; ".join(errores),
+                messages.WARNING,
+            )
+
+    @admin.action(
+        description="Bloquear participantes seleccionados",
+        permissions=["change"],
+    )
+    def bloquear_participantes(self, request, queryset):
+        if not self._autorizado(request):
+            self.message_user(
+                request, "No tienes permiso para bloquear participantes.",
+                messages.ERROR,
+            )
+            return None
+        if request.POST.get("confirmar_bloqueo") != "1":
+            return self._formulario_bloqueo(request, queryset)
+
+        motivo = request.POST.get("motivo")
+        if motivo not in dict(Bloqueo.motivos_manuales()):
+            self.message_user(
+                request, "Selecciona un motivo de bloqueo válido.",
+                messages.ERROR,
+            )
+            return None
+
+        bloqueados = 0
+        errores = []
+        for participante in queryset:
+            try:
+                bloquear_participante(
+                    participante, motivo, administrador=request.user,
+                )
+                bloqueados += 1
+            except BloqueoParticipanteError as error:
+                errores.append(f"{participante}: {error}")
+        self._resultado_accion(request, "bloqueados", bloqueados, errores)
+        return None
+
+    @admin.action(
+        description="Rehabilitar participantes seleccionados",
+        permissions=["change"],
+    )
+    def rehabilitar_participantes(self, request, queryset):
+        if not self._autorizado(request):
+            self.message_user(
+                request, "No tienes permiso para rehabilitar participantes.",
+                messages.ERROR,
+            )
+            return None
+
+        rehabilitados = 0
+        errores = []
+        for participante in queryset:
+            try:
+                rehabilitar_participante(participante, request.user)
+                rehabilitados += 1
+            except BloqueoParticipanteError as error:
+                errores.append(f"{participante}: {error}")
+        self._resultado_accion(request, "rehabilitados", rehabilitados, errores)
+        return None
+
+
+@admin.register(Bloqueo, site=admin_site)
+class BloqueoAdmin(AdminSistemaModelAdmin):
+    list_display = (
+        "participante", "motivo", "fecha_bloqueo", "bloqueado_por",
+        "fecha_desbloqueo", "desbloqueado_por",
+    )
+    list_filter = ("motivo",)
+    search_fields = (
+        "participante__nombre", "participante__ci", "bloqueado_por__username",
+        "desbloqueado_por__username",
+    )
+    list_select_related = ("participante", "bloqueado_por", "desbloqueado_por")
+    readonly_fields = (
+        "participante", "motivo", "fecha_bloqueo", "bloqueado_por",
+        "fecha_desbloqueo", "desbloqueado_por",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class AprobacionFilter(admin.SimpleListFilter):
@@ -72,22 +449,58 @@ class TallerAdmin(AdminSistemaModelAdmin):
     search_fields = ("codigo", "nombre", "instructor__nombre")
     list_select_related = ("instructor",)
     actions = ("aprobar_seleccionados", "rechazar_seleccionados")
+    etiquetas_auditoria = {"estado_aprobacion": "Estado de aprobación"}
 
     @admin.action(description="Aprobar propuestas seleccionadas")
     def aprobar_seleccionados(self, request, queryset):
-        actualizados = queryset.filter(
-            Q(estado_aprobacion=Taller.Aprobacion.PENDIENTE)
-            | Q(estado_aprobacion__isnull=True)
-        ).update(estado_aprobacion=Taller.Aprobacion.APROBADO)
-        self.message_user(request, f"{actualizados} taller(es) aprobados.", messages.SUCCESS)
+        self._cambiar_estado_talleres(
+            request, queryset, Taller.Aprobacion.APROBADO, "aprobados",
+        )
 
     @admin.action(description="Rechazar propuestas seleccionadas")
     def rechazar_seleccionados(self, request, queryset):
-        actualizados = queryset.filter(
-            Q(estado_aprobacion=Taller.Aprobacion.PENDIENTE)
-            | Q(estado_aprobacion__isnull=True)
-        ).update(estado_aprobacion=Taller.Aprobacion.RECHAZADO)
-        self.message_user(request, f"{actualizados} taller(es) rechazados.", messages.SUCCESS)
+        self._cambiar_estado_talleres(
+            request, queryset, Taller.Aprobacion.RECHAZADO, "rechazados",
+        )
+
+    def _cambiar_estado_talleres(self, request, queryset, nuevo_estado, resultado):
+        etiqueta = self._etiqueta_campo("estado_aprobacion")
+        campo = self.model._meta.get_field("estado_aprobacion")
+        actualizados = 0
+        for taller in queryset:
+            anterior = (
+                getattr(taller, "estado_aprobacion", None)
+                or Taller.Aprobacion.PENDIENTE
+            )
+            if anterior != Taller.Aprobacion.PENDIENTE:
+                continue
+            afectados = queryset.filter(
+                Q(pk=taller.pk)
+                & (
+                    Q(estado_aprobacion=Taller.Aprobacion.PENDIENTE)
+                    | Q(estado_aprobacion__isnull=True)
+                )
+            ).update(estado_aprobacion=nuevo_estado)
+            if not afectados:
+                continue
+            taller.estado_aprobacion = nuevo_estado
+            self.log_change(
+                request,
+                taller,
+                [{
+                    "changed": {
+                        "fields": [
+                            self._resumen_cambio(
+                                etiqueta, anterior, nuevo_estado, campo,
+                            )
+                        ]
+                    }
+                }],
+            )
+            actualizados += 1
+        self.message_user(
+            request, f"{actualizados} taller(es) {resultado}.", messages.SUCCESS,
+        )
 
 
 @admin.register(Inscripcion, site=admin_site)

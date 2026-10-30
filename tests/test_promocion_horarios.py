@@ -43,10 +43,12 @@ def test_promocion_usa_el_mismo_instante_limite_que_la_inscripcion(segundos_ante
         serializar.assert_not_called()
 
 
-def test_promueve_primero_habilitado_y_conserva_en_espera_los_incompatibles():
+@pytest.mark.parametrize("bloqueo_manual", [False, True])
+def test_promueve_primero_habilitado_y_conserva_en_espera_los_incompatibles(bloqueo_manual):
     taller = SimpleNamespace(fecha_inicio=INICIO, estado_aprobacion=Taller.Aprobacion.APROBADO)
     bloqueado, incompatible, habilitado, ultimo = [solicitud(n) for n in ("b", "i", "h", "u")]
-    bloqueado.participante.cancelaciones_consecutivas = 3
+    bloqueado.participante.bloqueado = bloqueo_manual
+    bloqueado.participante.cancelaciones_consecutivas = 0 if bloqueo_manual else 3
     otro = SimpleNamespace(codigo="T-ANT", nombre="Anterior", fecha_inicio=INICIO, fecha_fin=INICIO + timedelta(days=1))
     with patch.object(servicios.timezone, "now", return_value=INICIO - timedelta(days=1)), \
          patch.object(servicios, "consultar_espera", return_value=[bloqueado, incompatible, habilitado, ultimo]), \
