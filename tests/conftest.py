@@ -54,7 +54,7 @@ def fabrica(transactional_db):
     def cliente(perfil):
         c = Client(enforce_csrf_checks=True)
         token = c.get("/api/cuentas/sesion/").json()["csrfToken"]
-        respuesta = c.post("/api/cuentas/login/", {"ci": perfil.ci, "contrasena": clave},
+        respuesta = c.post("/api/cuentas/login/", {"ci": perfil.ci, "contrasena": clave, "rol": perfil.rol},
                            content_type="application/json", HTTP_X_CSRFTOKEN=token)
         assert respuesta.status_code == 200, respuesta.content
         c.defaults["HTTP_X_CSRFTOKEN"] = respuesta.json()["csrfToken"]

@@ -35,6 +35,17 @@ def test_registro_login_por_ci_y_privilegios(fabrica):
     assert cliente.get("/api/cuentas/sesion/").json()["usuario"]["ci"] == datos["ci"]
     assert cliente.post("/api/cuentas/logout/").status_code == 200
     assert cliente.get("/api/cuentas/sesion/").json()["usuario"] is None
+    instructor = fabrica.persona(cuenta=True, rol=Usuario.Rol.INSTRUCTOR)
+    for persona in (perfil, instructor):
+        cliente = Client(enforce_csrf_checks=True)
+        cliente.defaults["HTTP_X_CSRFTOKEN"] = cliente.get("/api/cuentas/sesion/").json()["csrfToken"]
+        datos_login = {"ci": persona.ci, "contrasena": fabrica.clave}
+        assert cliente.post("/api/cuentas/login/", datos_login, content_type="application/json").status_code == 400
+        otro_rol = "instructor" if persona.rol == "participante" else "participante"
+        respuesta = cliente.post("/api/cuentas/login/", {**datos_login, "rol": otro_rol}, content_type="application/json")
+        assert respuesta.status_code == 403
+        assert cliente.get("/api/cuentas/sesion/").json()["usuario"] is None
+        assert fabrica.cliente(persona).get("/api/cuentas/sesion/").json()["usuario"]["rol"] == persona.rol
 
 
 def test_ultimo_cupo_duplicados_y_limite_de_espera(fabrica):
@@ -112,9 +123,38 @@ def test_promocion_salta_bloqueados_y_cruces_y_conserva_fifo_con_aviso(fabrica):
     servicios.solicitar_espera(siguiente.ci, taller.codigo)
     otro = fabrica.taller("Horario incompatible", fecha=fabrica.inicio + timedelta(days=1))
     servicios.inscribir_participante(incompatible.ci, otro.codigo)
-    servicios.bloquear_participante(bloqueado, Bloqueo.Motivo.MANUAL, fabrica.administrador())
+    adicional = fabrica.taller("Otra inscripción del bloqueado", fecha=fabrica.inicio + timedelta(days=3), cupos=10)
+    for persona in [bloqueado] + [fabrica.persona() for _ in range(9)]:
+        servicios.inscribir_participante(persona.ci, adicional.codigo)
+    espera_adicional = [fabrica.persona(), fabrica.persona()]
+    for persona in espera_adicional:
+        servicios.solicitar_espera(persona.ci, adicional.codigo)
+    administrador = fabrica.administrador()
+    anteriores = list(Inscripcion.objects.order_by("id").values())
+    with patch.object(servicios, "_notificar", side_effect=RuntimeError("Entrega interrumpida")):
+        with pytest.raises(RuntimeError, match="Entrega interrumpida"):
+            servicios.bloquear_participante(bloqueado, Bloqueo.Motivo.MANUAL, administrador)
+    bloqueado.refresh_from_db()
+    assert not bloqueado.bloqueado
+    assert list(Inscripcion.objects.order_by("id").values()) == anteriores
+    assert not Cancelacion.objects.filter(participante=bloqueado).exists()
+    assert not Bloqueo.objects.filter(participante=bloqueado).exists()
+    assert not Notificacion.objects.exists()
+    servicios.bloquear_participante(bloqueado, Bloqueo.Motivo.MANUAL, administrador)
+    bloqueado.refresh_from_db()
+    assert bloqueado.bloqueado and bloqueado.cancelaciones_consecutivas == 0
+    assert not Inscripcion.objects.filter(participante=bloqueado).exists()
+    assert Cancelacion.objects.filter(participante=bloqueado).count() == 2
+    assert {c.estado_anterior for c in Cancelacion.objects.filter(participante=bloqueado)} == {"confirmada", "en_espera"}
+    assert Inscripcion.objects.get(participante=espera_adicional[0], taller=adicional).estado == "confirmada"
+    assert [s.participante_id for s in consultar_espera(adicional)] == [espera_adicional[1].pk]
+    assert cupos_disponibles(adicional) == 0
+    with pytest.raises(servicios.ParticipanteYaBloqueadoError):
+        servicios.bloquear_participante(bloqueado, Bloqueo.Motivo.MANUAL, administrador)
+    assert Cancelacion.objects.filter(participante=bloqueado).count() == 2
+    assert Notificacion.objects.filter(participante=bloqueado, tipo="bloqueo").count() == 1
     assert servicios.cancelar_inscripcion(titulares[0].ci, taller.codigo).promovido
-    assert [s.participante_id for s in consultar_espera(taller)] == [bloqueado.pk, incompatible.pk]
+    assert [s.participante_id for s in consultar_espera(taller)] == [incompatible.pk]
     assert Inscripcion.objects.get(participante=siguiente, taller=taller).estado == "confirmada"
     assert Notificacion.objects.filter(participante=siguiente, tipo="promocion").count() == 1
     assert not Notificacion.objects.filter(participante=bloqueado, tipo="promocion").exists()
@@ -124,13 +164,24 @@ def test_promocion_salta_bloqueados_y_cruces_y_conserva_fifo_con_aviso(fabrica):
 
 def test_tercera_cancelacion_bloquea_y_rehabilitacion_conserva_historial(fabrica):
     persona = fabrica.persona()
+    futuro = fabrica.taller("Confirmada pendiente", fecha=fabrica.inicio + timedelta(days=12))
+    servicios.inscribir_participante(persona.ci, futuro.codigo)
+    lleno = fabrica.taller("Espera pendiente", fecha=fabrica.inicio + timedelta(days=15))
+    for _ in range(5):
+        servicios.inscribir_participante(fabrica.persona().ci, lleno.codigo)
+    servicios.solicitar_espera(persona.ci, lleno.codigo)
+    iniciado = fabrica.taller("Taller iniciado", fecha=fabrica.inicio + timedelta(days=18))
+    servicios.inscribir_participante(persona.ci, iniciado.codigo)
+    Taller.objects.filter(pk=iniciado.pk).update(
+        fecha_inicio=fabrica.inicio - timedelta(days=12), fecha_fin=fabrica.inicio - timedelta(days=9))
     for n in range(3):
         taller = fabrica.taller(fecha=fabrica.inicio + timedelta(days=3 * n))
         servicios.inscribir_participante(persona.ci, taller.codigo)
         servicios.cancelar_inscripcion(persona.ci, taller.codigo)
     persona.refresh_from_db()
     assert persona.bloqueado and persona.cancelaciones_consecutivas == 3
-    assert Cancelacion.objects.filter(participante=persona).count() == 3
+    assert Cancelacion.objects.filter(participante=persona).count() == 6
+    assert not Inscripcion.objects.filter(participante=persona).exists()
     assert Notificacion.objects.filter(participante=persona, tipo="bloqueo").count() == 1
     destino = fabrica.taller()
     with pytest.raises(servicios.CuentaBloqueadaError):
@@ -139,7 +190,8 @@ def test_tercera_cancelacion_bloquea_y_rehabilitacion_conserva_historial(fabrica
     persona.refresh_from_db()
     assert not persona.bloqueado and persona.cancelaciones_consecutivas == 0
     assert Bloqueo.objects.get(participante=persona).fecha_desbloqueo is not None
-    assert Cancelacion.objects.filter(participante=persona).count() == 3
+    assert Cancelacion.objects.filter(participante=persona).count() == 6
+    assert not Inscripcion.objects.filter(participante=persona).exists()
     servicios.inscribir_participante(persona.ci, destino.codigo)
 
 

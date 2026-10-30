@@ -116,7 +116,7 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
     <main id="contenido-instructor" className="iw-main">
       <section className="iw-welcome">
         <div><p className="jw-eyebrow"><span /> TU ESPACIO PARA COMPARTIR</p><h1>Lo que sabes,<br /><em>puede abrir caminos.</em></h1><p>Hola, {usuario.nombre_usuario}. Dale forma a tu próxima idea y conviértela en un taller.</p></div>
-        <div className="iw-welcome-art" aria-hidden="true"><span>✳</span><div>Una idea.<br /><strong>Muchas<br />posibilidades.</strong><small>join.a.workshop ↗</small></div></div>
+        <div className="iw-welcome-art" aria-hidden="true"><span><span className="jw-join-mark" aria-hidden="true" /></span><div>Una idea.<br /><strong>Muchas<br />posibilidades.</strong><small>join.a.workshop ↗</small></div></div>
       </section>
       <div className="iw-overview" aria-label="Resumen de talleres">
         <div><span>Mis propuestas</span><strong>{cargando ? '—' : talleres.length.toString().padStart(2, '0')}</strong></div>
@@ -146,7 +146,7 @@ export default function InstructorPanel({ usuario, onCerrarSesion, onSesionCaduc
         <section className="iw-list" aria-labelledby="mis-talleres-titulo">
           <div className="iw-list-heading"><p className="jw-eyebrow">IDEAS QUE YA TOMARON FORMA</p><h2 id="mis-talleres-titulo">Mis talleres <span>{talleres.length}</span></h2><p>Revisa tus propuestas y acompaña cada paso.</p></div>
           {cargando && <p className="iw-empty" role="status">Cargando talleres…</p>}
-          {!cargando && talleres.length === 0 && <div className="iw-empty"><span aria-hidden="true">✳</span><h3>Tu primera idea empieza aquí.</h3><p>Aún no tienes propuestas. Completa el formulario para crear tu primer taller.</p></div>}
+          {!cargando && talleres.length === 0 && <div className="iw-empty"><span aria-hidden="true"><span className="jw-join-mark" aria-hidden="true" /></span><h3>Tu primera idea empieza aquí.</h3><p>Aún no tienes propuestas. Completa el formulario para crear tu primer taller.</p></div>}
           <div className="iw-cards">
             {talleres.map((taller) => <article className="iw-card" key={taller.codigo}>
               <div className="iw-card-top"><span>{taller.codigo}</span><span className={`iw-status iw-status-${taller.estado_aprobacion}`}>{({ aprobado: 'Aprobado', pendiente: 'En revisión', rechazado: 'Rechazado' })[taller.estado_aprobacion] || taller.estado_aprobacion}</span></div>

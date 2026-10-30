@@ -187,6 +187,7 @@ def _abrir_bloqueo(participante, motivo, administrador=None, *, reutilizar=False
     if abierto is not None:
         if reutilizar:
             _marcar_bloqueado(participante)
+            _cancelar_inscripciones_por_bloqueo(participante)
             return abierto
         raise ParticipanteYaBloqueadoError(
             "El participante ya tiene un bloqueo vigente."
@@ -210,12 +211,39 @@ def _abrir_bloqueo(participante, motivo, administrador=None, *, reutilizar=False
             "El participante ya tiene un bloqueo vigente."
         ) from None
     _marcar_bloqueado(participante)
+    _cancelar_inscripciones_por_bloqueo(participante)
     motivo_visible = dict(Bloqueo.Motivo.choices).get(motivo, motivo)
     _notificar(participante, Notificacion.Tipo.BLOQUEO, "Tu cuenta ha sido bloqueada",
         f"Motivo: {motivo_visible}. No puedes realizar nuevas inscripciones ni solicitar espera. "
-        "Tus inscripciones confirmadas se conservan. Contacta a la organización para solicitar la rehabilitación.",
+        "Se cancelaron todas tus inscripciones confirmadas y solicitudes en espera. "
+        "Contacta a la organización para solicitar la rehabilitación.",
         f"bloqueo:{bloqueo.pk}")
     return bloqueo
+
+
+def _cancelar_inscripciones_por_bloqueo(participante):
+    """Retira todas las activas sin sumar cancelaciones voluntarias.
+
+    Se ejecuta dentro de la transacción del bloqueo, también en talleres ya
+    iniciados. La promoción conserva sus propios requisitos de plazo y cupo.
+    """
+    solicitudes = list(Inscripcion.objects.filter(
+        participante=participante,
+    ).select_related("taller").order_by("taller_id", "id"))
+    for solicitud in solicitudes:
+        taller = solicitud.taller
+        Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") + 1)
+        Taller.objects.filter(pk=taller.pk).update(cupos=F("cupos") - 1)
+        Cancelacion.objects.create(
+            participante=participante,
+            taller=taller,
+            codigo_taller=taller.codigo,
+            nombre_taller=taller.nombre,
+            estado_anterior=solicitud.estado,
+        )
+        solicitud.delete()
+        if solicitud.estado == Inscripcion.Estado.CONFIRMADA:
+            _promover_desde_espera(taller)
 
 
 def bloquear_participante(participante, motivo, administrador=None):
@@ -543,14 +571,15 @@ def cancelar_inscripcion(ci, codigo_taller):
         getattr(participante, "cancelaciones_consecutivas", 0) or 0
     ) + 1
     participante.cancelaciones_consecutivas = total_cancelaciones
+    # Retirar primero esta solicitud evita que el bloqueo automático la
+    # cancele de nuevo cuando quite el resto de las inscripciones.
+    inscripcion.delete()
     if total_cancelaciones >= LIMITE_CANCELACIONES_CONSECUTIVAS:
         _abrir_bloqueo(
             participante,
             Bloqueo.Motivo.CANCELACIONES_CONSECUTIVAS,
             reutilizar=True,
         )
-    inscripcion.delete()
-
     promovido = None
     motivo_sin_promocion = None
     if estado_anterior == Inscripcion.Estado.CONFIRMADA:

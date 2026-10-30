@@ -12,9 +12,11 @@ from talleres.models import Bloqueo, Cancelacion, Inscripcion, Notificacion, Tal
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def ingresar(page, ci, clave):
+def ingresar(page, ci, clave, rol="participante"):
     page.goto("/")
     page.get_by_role("button", name="Descubrir talleres").click()
+    if rol == "instructor":
+        page.get_by_role("button", name="Instructor", exact=True).click()
     page.get_by_label("CI", exact=True).fill(ci)
     page.get_by_label("Contraseña", exact=True).fill(clave)
     page.get_by_role("button", name="Ingresar", exact=True).click()
@@ -138,6 +140,10 @@ def test_propuesta_instructor_aprobacion_admin_y_publicacion(fabrica, navegador)
     fecha = fabrica.inicio.astimezone(ZoneInfo("America/La_Paz"))
     with navegador() as (page, browser, base_url):
         ingresar(page, instructor.ci, fabrica.clave)
+        expect(page.get_by_role("alert")).to_contain_text("tipo de acceso seleccionado")
+        page.reload()
+        expect(page.get_by_role("button", name="Descubrir talleres")).to_be_visible()
+        ingresar(page, instructor.ci, fabrica.clave, rol="instructor")
         page.get_by_label("Nombre", exact=True).fill("Taller propuesto")
         page.get_by_label("Descripción", exact=True).fill("Una propuesta del instructor.")
         page.get_by_label("Cupo máximo").fill("10")
@@ -158,6 +164,8 @@ def test_propuesta_instructor_aprobacion_admin_y_publicacion(fabrica, navegador)
             admin_sesion.close()
         page.get_by_role("button", name="Cerrar sesión").click()
         expect(page.get_by_role("button", name="Descubrir talleres")).to_be_visible()
+        ingresar(page, participante.ci, fabrica.clave, rol="instructor")
+        expect(page.get_by_role("alert")).to_contain_text("tipo de acceso seleccionado")
         ingresar(page, participante.ci, fabrica.clave)
         expect(tarjeta(page, "Taller propuesto").get_by_role("button", name="Inscribirme", exact=True)).to_be_enabled()
     taller = Taller.objects.get(nombre="Taller propuesto")
