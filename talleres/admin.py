@@ -485,7 +485,9 @@ class TallerAdmin(AdminSistemaModelAdmin):
             )
             if anterior != Taller.Aprobacion.PENDIENTE:
                 continue
-            afectados = queryset.filter(
+            # El listado del admin carga relaciones; MongoDB solo admite
+            # update sobre una colección. Los seleccionados ya se iteran arriba.
+            afectados = Taller.objects.filter(
                 Q(pk=taller.pk)
                 & (
                     Q(estado_aprobacion=Taller.Aprobacion.PENDIENTE)

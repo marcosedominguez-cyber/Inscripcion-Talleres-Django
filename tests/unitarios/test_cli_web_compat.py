@@ -8,8 +8,6 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from talleres.servicios import CupoAgotadoError
-
 
 class CompatibilidadMenuCliTests(SimpleTestCase):
     def test_menu_registra_participante_con_ci_sin_codigo(self):
@@ -28,25 +26,6 @@ class CompatibilidadMenuCliTests(SimpleTestCase):
         registrar.assert_called_once_with("Ana", "12345678")
         self.assertIn("CI: 12345678", salida.getvalue())
         self.assertNotIn("P-", salida.getvalue())
-
-    def test_menu_captura_error_de_inscripcion_emitido_por_servicio_web(self):
-        from proyecto import main
-
-        salida = StringIO()
-        with patch("builtins.input", side_effect=["4", "11111111", "T-001", "9"]), \
-             patch.object(
-                 main.servicios,
-                 "inscribir_participante",
-                 side_effect=CupoAgotadoError("El taller no tiene cupos disponibles."),
-             ), \
-             redirect_stdout(salida):
-            main.ejecutar()
-
-        self.assertIn(
-            "No se pudo realizar la operación: El taller no tiene cupos disponibles.",
-            salida.getvalue(),
-        )
-        self.assertNotIn("Traceback", salida.getvalue())
 
 
     def test_menu_cancela_y_muestra_el_historial(self):

@@ -126,21 +126,42 @@ El menú solicita participantes, talleres, inscripciones y listados; sus fechas 
 
 ## Pruebas y validación
 
-La configuración de Python usa **pytest y pytest-django** (`pytest.ini`). Por defecto, `config/settings_test_api_participantes.py` configura SQLite en memoria, sin cargar `.env` ni conectar a Atlas. El workflow de CI instala `requirements.txt` y ejecuta la suite completa de backend y frontend; las pruebas con MongoDB local y el script de Atlas no forman parte de esa ejecución.
+La suite tiene **90 casos ejecutables**: **72 unitarios** (60 Python + 12 React),
+**14 de integración** con MongoDB y **4 end to end** con navegador real.
+Las filas parametrizadas se cuentan como pruebas individuales.
 
-Comandos disponibles según la configuración:
+Instalación de dependencias de desarrollo:
 
 ```bash
-# Backend (selección predeterminada de pytest.ini)
-source .venv/bin/activate
-python -m pytest
-
-# Frontend (Vitest, configuración en frontend/vite.config.js)
-cd frontend
-npm test
+python -m pip install -r requirements-ci.txt
+npm --prefix frontend ci
+python -m playwright install chromium
 ```
 
-Existe además `config/settings_test_mongodb_local.py`, que apunta a `mongodb://127.0.0.1:27017` y a una base de pruebas local fija; `tests/mongodb/test_migration_estado_aprobacion.py` corresponde a ese nivel. Úsalo únicamente con una instancia local desechable tras revisar qué datos altera. `scripts/verificar_atlas.py` requiere Atlas y, según el README anterior, crea y elimina una base temporal `test_cli_*`; no forma parte de la configuración pytest predeterminada.
+Desde la raíz:
+
+```bash
+# Las 72 unitarias; no requieren base de datos ni cargan el .env de la app.
+python scripts/ejecutar_pruebas.py
+
+# Las 90; mongod debe estar instalado. Inicia y elimina un replica set local temporal.
+python scripts/ejecutar_pruebas.py --completa
+```
+
+El ejecutor también acepta `--mongod /ruta/al/binario`. Para un entorno de pruebas
+en Atlas se configura únicamente `MONGODB_TEST_URI`; se genera una base nueva
+`test_talleres_<identificador>` por ejecución. Nunca se usa `MONGODB_DATABASE`
+ni se importa la configuración de producción. La cuenta necesita permisos sobre
+esa base de pruebas. La validación local no certifica el acceso al clúster Atlas.
+
+El workflow de CI instala `requirements-ci.txt`, prepara Chromium y un MongoDB
+local temporal y ejecuta las **90**, sin omitir integración ni navegador. Los
+resultados JUnit y el inventario quedan en `evidencias/`. Una prueba omitida,
+un fallo o una cantidad distinta a la esperada detiene el ejecutor.
+
+Con `python -m pytest -q` se ejecutan las 60 unitarias Python y se omiten las 18
+que necesitan MongoDB/navegador. Esa ejecución parcial no acredita las 90.
+Ver la [matriz y los comandos completos](docs/pruebas.md).
 
 ## Estructura principal
 
@@ -158,7 +179,7 @@ Existe además `config/settings_test_mongodb_local.py`, que apunta a `mongodb://
 | `frontend/src/cuentas/`, `gestion/`, `participantes/` | Cliente API y componentes React separados por área funcional; `api.js` contiene el transporte HTTP común. |
 | `proyecto/main.py`, `proyecto/reglas*.py` | Menú de terminal y reglas de dominio en memoria; programa independiente. |
 | `scripts/` | Verificación manual destructiva contra una base temporal de Atlas; no es una prueba automática. |
-| `tests/` | Pruebas web, reglas CLI y pruebas de migración MongoDB local. |
+| `tests/` | Unitarias de Python, integración con MongoDB y recorridos end to end. |
 | `docs/` | Requisitos, modelos, planificación y notas de arquitectura del proyecto. |
 
 
@@ -206,11 +227,11 @@ El catálogo devuelve `mi_estado`, `posicion_espera`, `limite_espera` y `lugares
 - El panel administrativo permite bloquear participantes con un motivo controlado y rehabilitarlos desde la ficha individual o mediante las acciones masivas. La rehabilitación registra fecha y administrador en el mismo episodio, conserva el historial y solo reinicia el contador cuando este alcanzó el límite, para iniciar un ciclo disciplinario nuevo.
 - API: `POST /api/participantes/inscripciones/cancelar/` con `codigo_taller` e identidad desde la sesión. `GET /api/participantes/inscripciones/` devuelve también `cancelaciones`, `cancelaciones_consecutivas`, `limite_cancelaciones` e `inscripciones_bloqueadas`.
 - La migración `0007_usuario_cancelaciones_consecutivas_cancelacion.py` agrega el contador y la colección de historial. La migración `0008_usuario_bloqueado_bloqueo.py` agrega `Usuario.bloqueado`, crea `bloqueos` e inicializa el estado de bloqueo de los participantes existentes sin crear historial sintético ni alterar cancelaciones.
-- La migración se aplica con `python manage.py migrate` únicamente después de verificar la conexión y las transacciones del entorno. Las pruebas de integración de MongoDB se omiten salvo que se use `--ds=config.settings_test_mongodb_local` contra una instancia local desechable.
+- La migración se aplica con `python manage.py migrate` únicamente después de verificar la conexión y las transacciones del entorno. La suite completa prepara MongoDB de pruebas mediante `python scripts/ejecutar_pruebas.py --completa`.
 
 Pruebas: `python -m pytest -q`, `npm test` desde frontend, y
 `python scripts/verificar_atlas.py` para verificación real en una base temporal.
-Las pruebas de cancelación, historial y bloqueo están en `tests/test_cancelaciones.py`.
+Las pruebas de cancelación, historial y bloqueo están en `tests/unitarios/`, `tests/integracion/test_flujos.py` y `tests/e2e/test_recorridos.py`.
 En entornos Windows restringidos, Vite admite `--configLoader runner`.
 
 La migración `0007` agrega el contador y la colección de historial sin alterar
