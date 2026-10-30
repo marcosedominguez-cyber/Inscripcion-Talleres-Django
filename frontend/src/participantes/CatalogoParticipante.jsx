@@ -420,7 +420,7 @@ export default function CatalogoParticipante({
             <div className="pw-orbit" />
             <div className="pw-art-card pw-art-card-back" />
             <div className="pw-art-card pw-art-card-front"><span>APRENDÉ</span><strong>algo<br />nuevo.</strong><div className="pw-art-lines" /></div>
-            <div className="pw-spark">✳</div>
+            <div className="pw-spark"><span className="jw-join-mark" aria-hidden="true" /></div>
           </div>
         </section>
         <section className="pw-listado" aria-labelledby="titulo-listado" aria-busy={estado.tipo === 'cargando'}>
@@ -455,7 +455,7 @@ export default function CatalogoParticipante({
                   onInscribirme={inscribirme} enviando={codigoEnviando !== null} />
               )) : (
                 <div className="pw-empty" role="status">
-                  <div className="pw-empty-icon" aria-hidden="true">✳</div>
+                  <div className="pw-empty-icon" aria-hidden="true"><span className="jw-join-mark" aria-hidden="true" /></div>
                   <h3>No hay talleres disponibles</h3>
                   <p>Volvé pronto para conocer las próximas actividades.</p>
                 </div>

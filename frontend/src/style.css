@@ -223,3 +223,6 @@ button:disabled { cursor: wait; opacity: .6; }
 /* LINK: two interlaced rings, a shared symbol for the three headers. */
 .jw-join-logo { display: block; width: 45px; height: 36px; flex: 0 0 auto; margin-right: 10px; overflow: visible; }
 @media(max-width: 700px) { .jw-join-logo { width: 40px; height: 32px; margin-right: 8px; } }
+
+/* The join symbol also replaces the decorative placeholders throughout the site. */
+.jw-join-mark { display: inline-block; width: 1.27em; height: 1em; vertical-align: middle; background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2066%2052%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M28.26%2043.21A18%2018%200%201%201%2036.79%2037.57%22%20stroke%3D%22%23193c38%22%20stroke-width%3D%228%22%2F%3E%3Cpath%20d%3D%22M37.74%208.79A18%2018%200%201%201%2029.21%2014.43%22%20stroke%3D%22%23176456%22%20stroke-width%3D%228%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat; }

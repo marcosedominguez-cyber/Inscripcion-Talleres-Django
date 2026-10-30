@@ -19,6 +19,9 @@ EVIDENCIAS = RAIZ / "evidencias"
 
 
 def ejecutar(comando, *, carpeta=RAIZ, entorno=None):
+    # Windows instala npm como npm.cmd; Popen necesita su ruta completa.
+    if comando[0] == "npm":
+        comando = [shutil.which("npm") or "npm", *comando[1:]]
     subprocess.run(comando, cwd=carpeta, env=entorno, check=True)
 
 
@@ -52,11 +55,17 @@ def mongodb_pruebas(ruta_mongod):
                 reserva.bind(("127.0.0.1", 0))
                 puerto = reserva.getsockname()[1]
             uri = f"mongodb://127.0.0.1:{puerto}/?directConnection=true"
-            proceso = subprocess.Popen([
+            comando = [
                 str(binario), "--dbpath", str(temporal), "--logpath", str(temporal / "mongodb.log"),
                 "--bind_ip", "127.0.0.1", "--port", str(puerto), "--replSet", "pruebas",
-                "--nounixsocket", "--wiredTigerCacheSizeGB", "0.25",
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+                "--wiredTigerCacheSizeGB", "0.25",
+            ]
+            if os.name != "nt":
+                comando.append("--nounixsocket")
+            proceso = subprocess.Popen(
+                comando, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
         cliente = MongoClient(uri, serverSelectionTimeoutMS=1000, connectTimeoutMS=1000)
         for _ in range(60):
             if proceso and proceso.poll() is not None:

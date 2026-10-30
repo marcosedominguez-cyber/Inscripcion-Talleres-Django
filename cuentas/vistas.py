@@ -103,8 +103,17 @@ def ingresar(request):
     cuenta = authenticate(request, ci=form.cleaned_data["ci"], password=form.cleaned_data["contrasena"])
     if cuenta is None:
         return JsonResponse({"mensaje": "CI o contraseña incorrectas."}, status=401)
+    try:
+        usuario = perfil_json(cuenta)
+    except ObjectDoesNotExist:
+        return JsonResponse({"mensaje": "Esta cuenta no tiene un perfil web asociado."}, status=403)
+    if usuario["rol"] != form.cleaned_data["rol"]:
+        return JsonResponse({
+            "mensaje": "La cuenta no corresponde al tipo de acceso seleccionado. "
+                       "Selecciona el rol de tu cuenta para iniciar sesión."
+        }, status=403)
     login(request, cuenta)
-    return JsonResponse({"usuario": perfil_json(cuenta), "csrfToken": get_token(request)})
+    return JsonResponse({"usuario": usuario, "csrfToken": get_token(request)})
 
 
 @require_POST

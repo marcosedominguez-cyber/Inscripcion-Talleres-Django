@@ -36,8 +36,8 @@ los cuatro conteos en los informes JUnit y rechaza resultados con omisiones.
 | Última plaza, duplicados y espera del 20 % | Integración con capacidad completa, rechazos y orden conservado |
 | FIFO entre personas habilitadas | Promoción real conserva bloqueados e incompatibles en espera y confirma a la siguiente persona |
 | Cancelaciones, historial y bloqueo por tercera cancelación | Integración de todo el ciclo; cancelación sin promoción si ya venció el plazo |
-| Bloqueo manual y rehabilitación | Regla unitaria, integración y recorrido administrativo en navegador |
-| Identidad desde sesión, propiedad del instructor y CSRF | Unitarias de API y cliente Django con cookies y validación CSRF reales |
+| Bloqueo manual y rehabilitación | Cancela confirmadas y espera con historial, conserva el contador voluntario y promueve sin sobrecupo; rollback ante fallo de aviso y recorrido administrativo real |
+| Identidad desde sesión, propiedad del instructor y CSRF | Acceso por el rol elegido, rechazos sin abrir sesión, unitarias de API, cliente Django y navegador reales |
 | Roles públicos y ausencia de privilegios administrativos | Registro real; unitarias de formularios y privilegios inyectados |
 | Borrados administrativos prohibidos | Seis casos independientes: GET/POST de usuario, taller e inscripción |
 | Auditoría y cambios de aprobación | Unitarias de mensajes y notificación; aprobación administrativa real desde navegador |
@@ -72,6 +72,8 @@ python -m playwright install chromium
 ```
 
 En Linux puede ser necesario `python -m playwright install --with-deps chromium`.
+En Windows con Microsoft Edge instalado se puede usar `PLAYWRIGHT_CHANNEL=msedge`
+como variable de entorno para los recorridos de navegador.
 
 ### Ejecución rápida, sin base de datos
 

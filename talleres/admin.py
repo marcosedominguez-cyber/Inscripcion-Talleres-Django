@@ -217,7 +217,9 @@ class UsuarioAdmin(AdminSistemaModelAdmin):
             title = "Bloquear participante"
             explicacion = (
                 "Se abrirá un episodio de bloqueo para el participante "
-                "seleccionado. Las inscripciones ya confirmadas se conservan."
+                "seleccionado. Se cancelarán sus inscripciones confirmadas y "
+                "solicitudes en espera, conservando los antecedentes. Las plazas "
+                "liberadas se asignarán según las reglas de promoción."
             )
             form_action = reverse(
                 f"{self.admin_site.name}:talleres_usuario_bloquear",
@@ -228,7 +230,9 @@ class UsuarioAdmin(AdminSistemaModelAdmin):
             title = "Bloquear participantes"
             explicacion = (
                 "Se abrirá un episodio de bloqueo para cada participante "
-                "seleccionado. Las inscripciones ya confirmadas se conservan."
+                "seleccionado. Se cancelarán sus inscripciones confirmadas y "
+                "solicitudes en espera, conservando los antecedentes. Las plazas "
+                "liberadas se asignarán según las reglas de promoción."
             )
             form_action = ""
             cancel_url = self._url_listado()

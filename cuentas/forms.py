@@ -48,3 +48,7 @@ class LoginForm(forms.Form):
     ci = forms.RegexField(r"^[0-9]{1,20}$", max_length=20,
                          error_messages={"invalid": "La CI debe contener solo números."})
     contrasena = forms.CharField(strip=False)
+    rol = forms.ChoiceField(choices=[
+        (Usuario.Rol.PARTICIPANTE, "Participante"),
+        (Usuario.Rol.INSTRUCTOR, "Instructor"),
+    ])

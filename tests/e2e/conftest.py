@@ -1,6 +1,7 @@
 """Navegador real contra el servidor Django con React compilado."""
 
 from contextlib import contextmanager
+import os
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ def navegador(live_server, request):
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = playwright.chromium.launch(channel=os.getenv("PLAYWRIGHT_CHANNEL") or None)
             context = browser.new_context(base_url=live_server.url, locale="es-BO")
             context.tracing.start(screenshots=True, snapshots=True)
             page = context.new_page()

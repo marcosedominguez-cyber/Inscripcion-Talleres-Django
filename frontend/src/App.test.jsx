@@ -45,6 +45,19 @@ test('un rechazo del servidor se muestra sin abrir la cuenta', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('CI o contraseña incorrectas.');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Ingresar' }).disabled).toBe(false));
   expect(screen.queryByText('Sesión iniciada')).toBeNull();
+  expect(api).toHaveBeenCalledWith('login', { ci: '1234', contrasena: 'incorrecta', rol: 'participante' });
+  fireEvent.click(screen.getByRole('button', { name: 'Instructor', exact: true }));
+  fireEvent.change(screen.getByLabelText('CI'), { target: { value: '1234' } });
+  fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'correcta' } });
+  api.mockImplementation(async (ruta) => {
+    if (ruta === 'login') throw new Error('La cuenta no corresponde al tipo de acceso seleccionado.');
+    return { usuario: null };
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Ingresar' }));
+  expect((await screen.findByRole('alert')).textContent).toBe('La cuenta no corresponde al tipo de acceso seleccionado.');
+  expect(api).toHaveBeenCalledWith('login', { ci: '1234', contrasena: 'correcta', rol: 'instructor' });
+  expect(screen.getByRole('button', { name: 'Instructor', exact: true }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.queryByRole('heading', { name: 'Proponer un taller' })).toBeNull();
 });
 
 
