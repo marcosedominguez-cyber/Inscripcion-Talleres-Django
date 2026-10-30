@@ -104,7 +104,7 @@ React, Django y MongoDB juntos, sin simular sus respuestas.
 
 ## Comprobación reproducible
 
-La reorganización general mantiene 90 casos en todo el proyecto. El inventario,
+La reorganización general mantiene 108 casos en todo el proyecto. El inventario,
 la distribución y la preparación de MongoDB se documentan en [pruebas.md](pruebas.md).
 Desde la raíz, con las dependencias y Chromium instalados:
 

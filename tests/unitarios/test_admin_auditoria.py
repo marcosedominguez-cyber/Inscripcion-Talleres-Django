@@ -153,6 +153,15 @@ class NotificacionesAdminTests(SimpleTestCase):
             modelo_admin.save_model(None, taller, formulario, True)
         actualizar.assert_called_once_with(anterior, {"nombre": "Nuevo título"}, reenviar_revision=False)
 
+    def test_edicion_sin_cambios_no_invoca_el_servicio(self):
+        from types import SimpleNamespace
+        modelo_admin = TallerAdmin(Taller, admin_site)
+        taller = crear_taller()
+        formulario = SimpleNamespace(changed_data=[])
+        with patch("talleres.admin.actualizar_taller") as actualizar:
+            modelo_admin.save_model(None, taller, formulario, True)
+        actualizar.assert_not_called()
+
     def test_aprobacion_masiva_notifica_solo_el_cambio_real(self):
         from contextlib import nullcontext
         modelo_admin = TallerAdmin(Taller, admin_site)

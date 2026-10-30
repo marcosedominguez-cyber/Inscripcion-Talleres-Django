@@ -1,4 +1,4 @@
-"""Ejecuta y cuenta la pirámide: 72 unitarias, 14 integración y 4 e2e."""
+"""Ejecuta y cuenta la pirámide: 81 unitarias, 23 integración y 4 e2e."""
 
 import argparse
 from contextlib import contextmanager
@@ -120,7 +120,7 @@ def mongodb_pruebas(ruta_mongod):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--completa", action="store_true", help="Incluye MongoDB real y navegador: 90 pruebas.")
+    parser.add_argument("--completa", action="store_true", help="Incluye MongoDB real y navegador: 108 pruebas.")
     parser.add_argument("--mongod", help="Ruta al binario mongod si no está en PATH.")
     args = parser.parse_args()
     EVIDENCIAS.mkdir(exist_ok=True)
@@ -133,19 +133,19 @@ def main():
     resultados = {}
     ejecutar([sys.executable, "-m", "pytest", "tests/unitarios", "-q", "--ds=config.settings_test_api_participantes",
               f"--junitxml={EVIDENCIAS / 'unitarios-python.xml'}"], entorno=entorno)
-    resultados["unitarios_python"] = comprobar_informe("unitarios-python", 60)
+    resultados["unitarios_python"] = comprobar_informe("unitarios-python", 69)
     ejecutar(["npm", "test", "--", "--reporter=junit", "--outputFile=../evidencias/unitarios-react.xml"], carpeta=RAIZ / "frontend")
     resultados["unitarios_react"] = comprobar_informe("unitarios-react", 12)
     if args.completa:
         ejecutar(["npm", "run", "build"], carpeta=RAIZ / "frontend")
         with mongodb_pruebas(args.mongod) as entorno_mongo:
-            for grupo, cantidad in (("integracion", 14), ("e2e", 4)):
+            for grupo, cantidad in (("integracion", 23), ("e2e", 4)):
                 ejecutar([sys.executable, "-m", "pytest", f"tests/{grupo}", "-q", "--ds=config.settings_test_mongodb", "--create-db",
                           f"--junitxml={EVIDENCIAS / (grupo + '.xml')}"], entorno=entorno_mongo)
                 resultados[grupo] = comprobar_informe(grupo, cantidad)
     total = sum(r["cantidad"] for r in resultados.values())
     (EVIDENCIAS / "resumen-pruebas.json").write_text(json.dumps({"total": total, "grupos": resultados}, ensure_ascii=False, indent=2))
-    print(f"\n{total} pruebas aprobadas: " + ("72 unitarias, 14 integración y 4 end to end." if args.completa else "72 unitarias. Usa --completa para las 90."))
+    print(f"\n{total} pruebas aprobadas: " + ("81 unitarias, 23 integración y 4 end to end." if args.completa else "81 unitarias. Usa --completa para las 108."))
 
 
 if __name__ == "__main__":
